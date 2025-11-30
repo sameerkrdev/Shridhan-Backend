@@ -4,6 +4,9 @@
     "outDir": "dist",
     "rootDir": "src",
     "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
 
     // Environment Settings
     "module": "node16", // Changed from "node20" - more stable/compatible
