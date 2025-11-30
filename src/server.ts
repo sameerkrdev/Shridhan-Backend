@@ -1,18 +1,31 @@
-import express from "express";
-import morgan from "morgan";
 import env from "@/config/dotenv";
-import logger from "./config/logger";
+import app from "@/app";
+import logger from "@/config/logger";
 
-const app = express();
-
-// Morgan logs HTTP requests
-app.use(morgan("combined"));
-
-app.get("/", (req, res) => {
-  logger.info("Welcome to shridhan");
-  res.json({ message: "Welcome to Shridhan" });
+// Handle graceful shutdown
+process.on("SIGINT", () => {
+  logger.info("Shutting down server...");
+  process.exit(0);
 });
 
-app.listen(env.PORT, () => {
-  logger.info(`Server is running on PORT ${env.PORT}`);
+process.on("SIGTERM", () => {
+  logger.info("Shutting down server...");
+  process.exit(0);
 });
+
+const startServer = () => {
+  const PORT = env.PORT;
+
+  try {
+    app.listen(PORT, () => {
+      logger.info(`Server is running on port ${PORT}...`);
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      logger.error(error.message);
+      process.exit(1);
+    }
+  }
+};
+
+startServer();
