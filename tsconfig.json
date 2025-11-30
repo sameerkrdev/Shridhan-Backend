@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    // File Layout
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+
+    // Environment Settings
+    "module": "node16", // Changed from "node20" - more stable/compatible
+    "moduleResolution": "node16",
+    "target": "ES2022", // Changed from "es2024" - better Node.js LTS support
+    "lib": ["ES2022"], // Match target version
+    "types": ["node"],
+
+    // Other Outputs
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Express-specific additions
+    "esModuleInterop": true, // Important for Express default imports
+    "allowSyntheticDefaultImports": true, // Helps with module imports
+    "resolveJsonModule": true, // If you import JSON configs
+    "forceConsistentCasingInFileNames": true, // Good for cross-platform
+
+    // Stricter Typechecking Options
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    // Recommended Options
+    "strict": true,
+    // "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
+}
