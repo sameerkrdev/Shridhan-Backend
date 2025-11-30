@@ -140,4 +140,32 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-/src/generated/prisma
+# Prisma generated client
+src/generated/
+
+# TypeScript build output
+dist/
+build/
+
+# Environment variables (keep .env.example)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Debug files
+*.log
+debug.log

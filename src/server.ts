@@ -1,6 +1,6 @@
-import env from "@/config/dotenv";
-import app from "@/app";
-import logger from "@/config/logger";
+import env from "@/config/dotenv.js";
+import app from "@/app.js";
+import logger from "@/config/logger.js";
 
 // Handle graceful shutdown
 process.on("SIGINT", () => {

@@ -1,15 +1,18 @@
 import { config } from "dotenv";
 import { cleanEnv, port, str } from "envalid";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 config({
-  path: path.join(__dirname, "../../.env"),
+  path: join(__dirname, "../../.env"),
 });
 
 const env = cleanEnv(process.env, {
-  PORT: port(),
-  NODE_ENV: str({ choices: ["development", "test", "production"] }),
-
+  PORT: port({ default: 3000 }),
+  NODE_ENV: str({ choices: ["development", "test", "production"], default: "development" }),
   DATABASE_URL: str(),
 });
 
