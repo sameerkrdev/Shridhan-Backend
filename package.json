@@ -15,7 +15,12 @@
     "format": "prettier . --check",
     "format:fix": "prettier . --write",
     "check-types": "tsc --noEmit -p tsconfig.json",
-    "prepare": "husky"
+    "prepare": "husky",
+    "prisma:studio": "prisma studio",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:reset": "prisma migrate reset"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -28,12 +33,15 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.7.3",
+    "prisma": "^7.0.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0"
   },
   "dependencies": {
+    "@prisma/client": "^7.0.1",
+    "@prisma/extension-accelerate": "^3.0.0",
     "dotenv": "^17.2.3",
     "envalid": "^8.1.1",
     "express": "^5.1.0",

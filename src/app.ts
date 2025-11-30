@@ -4,6 +4,7 @@ import express from "express";
 import morgan from "morgan";
 import type { HttpError } from "http-errors";
 import logger from "@/config/logger";
+import prisma from "@/config/prisma";
 
 const app = express();
 app.use(express.json());
@@ -11,7 +12,14 @@ app.use(express.json());
 // Morgan logs HTTP requests
 app.use(morgan("combined"));
 
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
+  await prisma.user.create({
+    data: {
+      name: "sameer",
+      email: "test@sameer.com",
+      phoneNumber: "123456789",
+    },
+  });
   res.json({ message: "Welcome to Shridhan" });
 });
 
