@@ -22,9 +22,10 @@ app.use((err: HttpError, req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof Error) {
     const statusCode = err.status || err.statusCode || 500;
 
+    // Log complete error safely
     logger.error({
-      message: err.message,
       name: err.name,
+      message: err.message,
       stack: err.stack,
       method: req.method,
       path: req.originalUrl,
@@ -32,18 +33,19 @@ app.use((err: HttpError, req: Request, res: Response, _next: NextFunction) => {
       query: req.query,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       body: { ...req.body, ...((req.body as { password: string }).password && { password: null }) },
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      details: err.details,
     });
 
-    // Send response to client
-    res.status(statusCode).json({
-      error: [
-        {
-          type: err.name,
-          msg: err.message,
-          method: req.method,
-          path: req.originalUrl,
-        },
-      ],
+    // Send clean structured response
+    return res.status(statusCode).json({
+      success: false,
+      message: err.message || "Internal Server Error",
+      method: req.method,
+      path: req.originalUrl,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      details: err.details,
     });
   }
 });
