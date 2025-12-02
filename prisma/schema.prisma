@@ -10,38 +10,277 @@ datasource db {
   provider = "postgresql"
 }
 
-model Member {
-  id          String  @id @default(uuid())
-  name        String
-  phoneNumber String
-  email       String?
+enum LoanStatus {
+  ONGOING
+  COMPLETED
+}
 
-  society   Society? @relation(fields: [societyId], references: [id])
-  societyId String?
+enum LoanEmiStatus {
+  PENDING
+  PAID
+}
 
+enum ServiceStatus {
+  ACTIVE
+  COMPLETED
+  CLOSED
+}
+
+enum FixDepositTransactionType {
+  CREDIT
+  PAYOUT
+}
+
+enum RecuringDepositTransactionType {
+  CREDIT
+  PAYOUT
+}
+
+enum ServiceType {
+  FIX_DEPOSIT
+  RECURING_DEPOSIT
+  MONTHLY_INTEREST_SCHEME
+}
+
+model User {
+  id        String   @id @default(uuid())
+  fullName  String
+  email     String   @unique
+  phone     String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("member")
+  societies SocietyUser[]
 }
 
 model Society {
-  id   String @id @default(uuid())
-  name String
-
-  subDomainName String
-  country       String
-  state         String
-  city          String
-  zipcode       String
-  logoUrl       String
-
-  status String
-
-  members Member[]
-
+  id        String   @id @default(uuid())
+  name      String
+  subDomain String   @unique
+  country   String
+  state     String
+  city      String
+  zipcode   String
+  logoUrl   String?
+  status    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("societies")
+  staff         SocietyUser[]
+  members       Member[]
+  subscriptions Subscriptions[]
+}
+
+model SocietyUser {
+  id        String   @id @default(uuid())
+  societyId String
+  userId    String
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society Society @relation(fields: [societyId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model Member {
+  id        String   @id @default(uuid())
+  societyId String
+  fullName  String
+  phone     String
+  address   String?
+  adhaar    String?
+  pan       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society          Society                 @relation(fields: [societyId], references: [id])
+  loans            Loan[]
+  fixDeposits      FixDeposit[]
+  recuringDeposits RecuringDeposit[]
+  monthlySchemes   MonthlyInterestScheme[]
+}
+
+model Loan {
+  id              String     @id @default(uuid())
+  memberId        String
+  principalAmount Decimal
+  interestRate    Decimal
+  fineBaseRate    Decimal
+  fineCurrentRate Decimal
+  fineAccumulated Decimal    @default(0)
+  totalPaid       Decimal    @default(0)
+  startDate       DateTime
+  dueDate         DateTime
+  status          LoanStatus
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  member   Member    @relation(fields: [memberId], references: [id])
+  emi      LoanEmi[]
+  nominees Nominee[]
+}
+
+model LoanEmi {
+  id         String        @id @default(uuid())
+  loanId     String
+  amount     Decimal
+  fineAmount Decimal       @default(0)
+  dueDate    DateTime
+  paidDate   DateTime?
+  status     LoanEmiStatus
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  loan Loan @relation(fields: [loanId], references: [id])
+}
+
+model Nominee {
+  id        String   @id @default(uuid())
+  loanId    String
+  name      String
+  phone     String
+  relation  String
+  adhaar    String
+  pan       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  loan Loan @relation(fields: [loanId], references: [id])
+}
+
+model ProjectType {
+  id                     String                  @id @default(uuid())
+  societyId              String
+  serviceType            ServiceType
+  monthlyDepositAmount   Decimal
+  monthlyPayoutAmount    Decimal
+  interestRate           Decimal
+  fineRate               Decimal
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  fixDeposits            FixDeposit[]
+  monthlyInterestSchemes MonthlyInterestScheme[]
+  recuringDeposits       RecuringDeposit[]
+}
+
+model FixDeposit {
+  id                  String        @id @default(uuid())
+  memberId            String
+  projectTypeId       String
+  isProjectTypeCustom Boolean
+  depositAmount       Decimal
+  payoutAmount        Decimal
+  interestRate        Decimal
+  startDate           DateTime
+  endDate             DateTime
+  status              ServiceStatus
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  member       Member                  @relation(fields: [memberId], references: [id])
+  projectType  ProjectType             @relation(fields: [projectTypeId], references: [id])
+  transactions FixDepositTransaction[]
+}
+
+model FixDepositTransaction {
+  id           String                    @id @default(uuid())
+  fixDepositId String
+  type         FixDepositTransactionType
+  amount       Decimal
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+
+  fixDeposit FixDeposit @relation(fields: [fixDepositId], references: [id])
+}
+
+model MonthlyInterestScheme {
+  id                  String        @id @default(uuid())
+  memberId            String
+  projectTypeId       String
+  isProjectTypeCustom Boolean
+  depositAmount       Decimal
+  interestRate        Decimal
+  totalInterest       Decimal
+  totalInterestPaid   Decimal
+  startDate           DateTime
+  endDate             DateTime
+  status              ServiceStatus
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  member       Member                             @relation(fields: [memberId], references: [id])
+  projectType  ProjectType                        @relation(fields: [projectTypeId], references: [id])
+  transactions MonthlyInterestSchemeTransaction[]
+}
+
+model MonthlyInterestSchemeTransaction {
+  id                      String   @id @default(uuid())
+  monthlyInterestSchemeId String
+  month                   String
+  amount                  Decimal
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  monthlyInterestScheme MonthlyInterestScheme @relation(fields: [monthlyInterestSchemeId], references: [id])
+}
+
+model RecuringDeposit {
+  id                  String        @id @default(uuid())
+  memberId            String
+  projectTypeId       String
+  isProjectTypeCustom Boolean
+  depositAmount       Decimal
+  payoutAmount        Decimal
+  interestRate        Decimal
+  fineBaseRate        Decimal
+  fineCurrentRate     Decimal
+  fineAccumulated     Decimal       @default(0)
+  startDate           DateTime
+  endDate             DateTime
+  status              ServiceStatus
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  member       Member                       @relation(fields: [memberId], references: [id])
+  projectType  ProjectType                  @relation(fields: [projectTypeId], references: [id])
+  transactions RecuringDepositTransaction[]
+}
+
+model RecuringDepositTransaction {
+  id                String                         @id @default(uuid())
+  recuringDepositId String
+  month             String
+  amount            Decimal
+  fineAmount        Decimal                        @default(0)
+  type              RecuringDepositTransactionType
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
+
+  recuringDeposit RecuringDeposit @relation(fields: [recuringDepositId], references: [id])
+}
+
+model SubscriptionPlan {
+  id           String   @id @default(uuid())
+  planName     String
+  ratePerMonth Decimal
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscriptions Subscriptions[]
+}
+
+model Subscriptions {
+  planId    String
+  societyId String
+  isActive  Boolean  @default(true)
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan    SubscriptionPlan @relation(fields: [planId], references: [id])
+  society Society          @relation(fields: [societyId], references: [id])
+
+  @@id([planId, societyId])
 }
