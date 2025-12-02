@@ -4,6 +4,6 @@ import env from "@/config/dotenv.js";
 
 const prisma = new PrismaClient({
   accelerateUrl: env.DATABASE_URL,
-}).$extends(withAccelerate()) as unknown as PrismaClient;
+}).$extends(withAccelerate());
 
 export default prisma;

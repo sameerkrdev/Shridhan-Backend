@@ -10,14 +10,38 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id          String @id @default(uuid())
+model Member {
+  id          String  @id @default(uuid())
   name        String
   phoneNumber String
-  email       String
+  email       String?
+
+  society   Society? @relation(fields: [societyId], references: [id])
+  societyId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("users")
+  @@map("member")
+}
+
+model Society {
+  id   String @id @default(uuid())
+  name String
+
+  subDomainName String
+  country       String
+  state         String
+  city          String
+  zipcode       String
+  logoUrl       String
+
+  status String
+
+  members Member[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("societies")
 }
