@@ -1,6 +1,6 @@
 import { signupMember } from "@/controllers/memberController.js";
 import express from "express";
-import zodValidatorMiddleware from "@/utils/zodValidationMiddleware.js";
+import zodValidatorMiddleware from "@/middlewares/zodValidationMiddleware.js";
 import { createFirstMemberValidationSchema } from "@/zodValidationSchema/memberValidationSchema.js";
 
 const router = express.Router();
