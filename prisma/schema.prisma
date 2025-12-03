@@ -53,16 +53,23 @@ model User {
   societies SocietyUser[]
 }
 
+enum SocietyStatus {
+  CREATED
+}
+
 model Society {
-  id        String   @id @default(uuid())
-  name      String
-  subDomain String   @unique
-  country   String
-  state     String
-  city      String
-  zipcode   String
-  logoUrl   String?
-  status    String
+  id   String @id @default(uuid())
+  name String @unique
+
+  subDomainName String @unique
+  country       String
+  state         String
+  city          String
+  zipcode       String
+  logoUrl       String
+
+  status SocietyStatus
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
