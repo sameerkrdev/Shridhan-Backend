@@ -54,7 +54,7 @@ enum TransactionType {
   PAYOUT
 }
 
-enum RecuringDepositTransactionType {
+enum RecurringDepositTransactionType {
   CREDIT
   PAYOUT
 }
@@ -111,7 +111,7 @@ model Society {
   customers                         Customer[]
   members                           Member[]
   subscriptions                     Subscription[]
-  recuringDepositProjectType        RecuringDepositProjectType[]
+  recurringDepositProjectType       RecurringDepositProjectType[]
   monthlyInterestSchemeProjectTypes MonthlyInterestSchemeProjectType[]
   fixedDepositProjectType           FixedDepositProjectType[]
 
@@ -232,8 +232,8 @@ model Member {
   phone String
   role  String
 
-  societyId String
-  society   Society @relation(fields: [societyId], references: [id])
+  societyId String?
+  society   Society? @relation(fields: [societyId], references: [id])
 
   customers Customer[]
 
@@ -272,11 +272,11 @@ model Customer {
   memberId String
   member   Member @relation(fields: [memberId], references: [id])
 
-  nomiees          Nominee[]
-  loans            Loan[]
-  fixDeposits      FixDeposit[]
-  recuringDeposits RecuringDeposit[]
-  monthlySchemes   MonthlyInterestScheme[]
+  nominees          Nominee[]
+  loans             Loan[]
+  fixDeposits       FixDeposit[]
+  recurringDeposits RecurringDeposit[]
+  monthlySchemes    MonthlyInterestScheme[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -502,7 +502,7 @@ model MonthlyInterestSchemeTransaction {
 }
 
 // TODO: Recheck the model of RD and Loan and its fine system 
-model RecuringDepositProjectType {
+model RecurringDepositProjectType {
   id   String @id @default(uuid())
   name String
 
@@ -517,7 +517,7 @@ model RecuringDepositProjectType {
   societyId String
   society   Society @relation(fields: [societyId], references: [id])
 
-  recuringDeposit RecuringDeposit[]
+  recurringDeposit RecurringDeposit[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -533,7 +533,7 @@ model RecuringDepositProjectType {
   @@index([name])
 }
 
-model RecuringDeposit {
+model RecurringDeposit {
   id String @id @default(uuid())
 
   isProjectTypeCustom Boolean
@@ -548,12 +548,12 @@ model RecuringDeposit {
   status              ServiceStatus
 
   projectTypeId String
-  projectType   RecuringDepositProjectType @relation(fields: [projectTypeId], references: [id])
+  projectType   RecurringDepositProjectType @relation(fields: [projectTypeId], references: [id])
 
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  transactions RecuringDepositTransaction[]
+  transactions RecurringDepositTransaction[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -569,15 +569,15 @@ model RecuringDeposit {
   @@index([customerId])
 }
 
-model RecuringDepositTransaction {
-  id                String                         @id @default(uuid())
-  recuringDepositId String
-  month             String
-  amount            Decimal                        @db.Decimal(14, 2)
-  fineAmount        Decimal                        @default(0) @db.Decimal(14, 2)
-  type              RecuringDepositTransactionType
+model RecurringDepositTransaction {
+  id                 String                          @id @default(uuid())
+  recurringDepositId String
+  month              String
+  amount             Decimal                         @db.Decimal(14, 2)
+  fineAmount         Decimal                         @default(0) @db.Decimal(14, 2)
+  type               RecurringDepositTransactionType
 
-  recuringDeposit RecuringDeposit @relation(fields: [recuringDepositId], references: [id])
+  recurringDeposit RecurringDeposit @relation(fields: [recurringDepositId], references: [id])
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -589,7 +589,7 @@ model RecuringDepositTransaction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([recuringDepositId])
+  @@index([recurringDepositId])
 }
 
 model Loan {
