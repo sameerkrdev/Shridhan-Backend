@@ -12,6 +12,8 @@ export const onboardSocietyValidationSchema = z.object({
     city: z.string().min(2, "City is required"),
     zipcode: z.string().min(4, "Zip code is too short").max(10, "Zip code is too long"),
     logoUrl: z.url("Invalid logo URL"),
+    // TODO: remove the createdBy
+    createdBy: z.uuid(),
   }),
 });
 

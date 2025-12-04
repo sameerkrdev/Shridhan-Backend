@@ -8,9 +8,9 @@ export const signupMember = async (
   next: NextFunction,
 ) => {
   try {
-    const { name, phoneNumber, email } = req.body;
+    const { name, phone, email, role } = req.body;
 
-    const member = await createFirstMember({ name, phoneNumber, email });
+    const member = await createFirstMember({ name, phone, email, role });
 
     res.json(member);
   } catch (error) {

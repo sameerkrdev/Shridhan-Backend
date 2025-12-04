@@ -9,7 +9,7 @@ export const onboardSociety = async (
   next: NextFunction,
 ) => {
   try {
-    const { name, subDomainName, country, state, city, zipcode, logoUrl } = req.body;
+    const { name, subDomainName, country, state, city, zipcode, logoUrl, createdBy } = req.body;
 
     const member = await createSociety({
       name,
@@ -20,6 +20,7 @@ export const onboardSociety = async (
       zipcode,
       logoUrl,
       status: SocietyStatus.CREATED,
+      createdBy,
     });
 
     res.json(member);
