@@ -4,8 +4,7 @@ import morgan from "morgan";
 import type { HttpError } from "http-errors";
 import logger from "@/config/logger.js";
 import memberRouter from "@/routes/memberRoutes.js";
-import prisma from "./config/prisma.js";
-import permit from "./config/permit.js";
+import societyRouter from "@/routes/societyRoutes.js";
 
 const app = express();
 app.use(express.json());
@@ -14,12 +13,13 @@ app.use(express.json());
 app.use(morgan("combined"));
 
 app.use("/api/v1/members", memberRouter);
+app.use("/api/v1/societies", societyRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });
 });
 
-app.post("/users", async (req, res) => {
+app.post("/users", (req, res) => {
   try {
     res.json({ success: true });
   } catch (error) {
@@ -29,34 +29,34 @@ app.post("/users", async (req, res) => {
   }
 });
 
-export function authorize(resource: string, action: string) {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const userId = req.body.userId;
-    const societyId = req.body.societyId;
+// export function authorize(resource: string, action: string) {
+//   return async (req: Request, res: Response, next: NextFunction) => {
+//     const userId = req.body.userId;
+//     const societyId = req.body.societyId;
 
-    const r = await permit.api.getUser(userId);
+//     const r = await permit.api.getUser(userId);
 
-    const allowed = await permit.check(userId, action, {
-      type: resource,
-      tenant: societyId,
-    });
-    console.log("check ->", {
-      userId,
-      action,
-      resource,
-      tenant: societyId,
-    });
-    console.log("permit tenant roles:", r.associated_tenants);
+//     const allowed = await permit.check(userId, action, {
+//       type: resource,
+//       tenant: societyId,
+//     });
+//     console.log("check ->", {
+//       userId,
+//       action,
+//       resource,
+//       tenant: societyId,
+//     });
+//     console.log("permit tenant roles:", r.associated_tenants);
 
-    console.log(allowed);
+//     console.log(allowed);
 
-    if (!allowed) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
+//     if (!allowed) {
+//       return res.status(403).json({ message: "Forbidden" });
+//     }
 
-    next();
-  };
-}
+//     next();
+//   };
+// }
 
 // app.post("/create-society", async (req, res) => {
 //   try {

@@ -4,7 +4,7 @@ import type { Prisma } from "@/generated/prisma/client.js";
 export const createFirstMember = async (data: Prisma.MemberCreateInput) => {
   try {
     const member = await prisma.member.findFirst({
-      where: { phoneNumber: data.phoneNumber },
+      where: { phone: data.phone },
     });
 
     if (member && !member?.societyId) {
