@@ -3,7 +3,7 @@ import express from "express";
 import morgan from "morgan";
 import type { HttpError } from "http-errors";
 import logger from "@/config/logger.js";
-import memberRouter from "@/routes/memberRoutes.js";
+import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
 
 const app = express();

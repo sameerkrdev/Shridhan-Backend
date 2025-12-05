@@ -1,5 +1,6 @@
 import prisma from "@/config/prisma.js";
 import type { Prisma } from "@/generated/prisma/client.js";
+import createHttpError from "http-errors";
 
 export const createFirstMember = async (data: Prisma.MemberCreateInput) => {
   try {
@@ -16,6 +17,25 @@ export const createFirstMember = async (data: Prisma.MemberCreateInput) => {
     });
 
     return newMember;
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const loginMember = async (phone: string, societyId: string) => {
+  try {
+    const member = await prisma.member.findFirst({
+      where: { phone, societyId },
+    });
+
+    if (!member) {
+      const error = createHttpError(404, "Member doesn't exists", {
+        details: { phone, societyId },
+      });
+      throw error;
+    }
+
+    return member;
   } catch (error) {
     throw error;
   }
