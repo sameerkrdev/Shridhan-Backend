@@ -103,7 +103,7 @@ model Society {
   zipcode       String
   logoUrl       String
 
-  status SocietyStatus
+  status SocietyStatus @default(CREATED)
 
   // Subscription / billing settings per society
   planSettings SocietyPlanSettings?
@@ -235,7 +235,8 @@ model Member {
   societyId String?
   society   Society? @relation(fields: [societyId], references: [id])
 
-  customers Customer[]
+  refreshTokens RefreshToken[]
+  customers     Customer[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -250,6 +251,27 @@ model Member {
   @@unique([societyId, phone])
   @@index([societyId])
   @@index([phone])
+}
+
+// Add to your schema
+model RefreshToken {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+
+  // Track device/session info
+  deviceId  String?
+  userAgent String?
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId])
+  @@index([expiresAt])
 }
 
 model Customer {

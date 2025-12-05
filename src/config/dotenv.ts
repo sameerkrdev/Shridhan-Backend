@@ -15,6 +15,11 @@ const env = cleanEnv(process.env, {
   NODE_ENV: str({ choices: ["development", "test", "production"], default: "development" }),
   DATABASE_URL: str(),
   PERMIT_API_KEY: str(),
+
+  JWT_PUBLIC_KEY: str(),
+  JWT_PRIVATE_KEY: str(),
+
+  COOKIE_DOMAIN: str({ default: ".myapp.com" }),
 });
 
 export default env;

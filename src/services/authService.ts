@@ -1,6 +1,7 @@
 import prisma from "@/config/prisma.js";
 import type { Prisma } from "@/generated/prisma/client.js";
 import createHttpError from "http-errors";
+import { generateTokenPair } from "./authTokenService.js";
 
 export const createFirstMember = async (data: Prisma.MemberCreateInput) => {
   try {
@@ -16,7 +17,9 @@ export const createFirstMember = async (data: Prisma.MemberCreateInput) => {
       data,
     });
 
-    return newMember;
+    const { accessToken, refreshToken } = await generateTokenPair(newMember.id);
+
+    return { newMember, accessToken, refreshToken };
   } catch (error) {
     throw error;
   }
@@ -35,7 +38,9 @@ export const loginMember = async (phone: string, societyId: string) => {
       throw error;
     }
 
-    return member;
+    const { accessToken, refreshToken } = await generateTokenPair(member.id);
+
+    return { member, accessToken, refreshToken };
   } catch (error) {
     throw error;
   }
