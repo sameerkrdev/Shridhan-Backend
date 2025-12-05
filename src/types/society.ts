@@ -1,6 +1,6 @@
 import type { OnboardSocietyValidationSchema } from "@/zodValidationSchema/societyValidationSchema.js";
-import type { Request } from "express";
+import type { IAuthorizedRequest } from "./authType.js";
 
-export interface IOnboardSocietyRequest extends Request {
+export interface IOnboardSocietyRequest extends IAuthorizedRequest {
   body: OnboardSocietyValidationSchema["body"];
 }
