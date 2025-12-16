@@ -11,3 +11,12 @@ export const createFirstMemberValidationSchema = z.object({
 });
 
 export type CreateFirstMemberValidationSchema = z.infer<typeof createFirstMemberValidationSchema>;
+
+export const loginValidationSchema = z.object({
+  body: z.object({
+    phone: z.string().min(10, "Phone is required"),
+    societyId: z.uuid(),
+  }),
+});
+
+export type LoginValidationSchema = z.infer<typeof loginValidationSchema>;

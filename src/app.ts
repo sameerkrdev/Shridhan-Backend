@@ -3,8 +3,9 @@ import express from "express";
 import morgan from "morgan";
 import type { HttpError } from "http-errors";
 import logger from "@/config/logger.js";
-import memberRouter from "@/routes/memberRoutes.js";
+import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
+import otpRouter from "@/routes/otpRoutes.js";
 
 const app = express();
 app.use(express.json());
@@ -14,6 +15,7 @@ app.use(morgan("combined"));
 
 app.use("/api/v1/members", memberRouter);
 app.use("/api/v1/societies", societyRouter);
+app.use("/api/v1/otp", otpRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });

@@ -25,8 +25,10 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/express": "^5.0.5",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
     "@types/node": "^24.10.1",
+    "@types/nodemailer": "^7.0.4",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.5.0",
@@ -48,11 +50,14 @@
     "envalid": "^8.1.1",
     "express": "^5.1.0",
     "http-errors": "^2.0.1",
+    "ioredis": "^5.8.2",
+    "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "nodemailer": "^7.0.11",
     "nodemon": "^3.1.11",
+    "permitio": "^2.7.5",
     "winston": "^3.18.3",
-    "zod": "^4.1.13",
-    "permitio": "^2.7.5"
+    "zod": "^4.1.13"
   },
   "lint-staged": {
     "**/*.ts": [
