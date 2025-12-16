@@ -20,6 +20,17 @@ const env = cleanEnv(process.env, {
   JWT_PRIVATE_KEY: str(),
 
   COOKIE_DOMAIN: str({ default: ".myapp.com" }),
+
+  REDIS_URI: str(),
+
+  SMTP_HOST: str(),
+  SMTP_PORT: str(),
+  SMTP_USER: str(),
+  SMTP_PASS: str(),
+  EMAIL_FROM: str(),
+
+  WHATSAPP_ACCESS_TOKEN: str(),
+  WHATSAPP_PHONE_NUMBER_ID: str(),
 });
 
 export default env;
