@@ -1,6 +1,7 @@
 import createHttpError from "http-errors";
 import logger from "@/config/logger.js";
 import env from "@/config/dotenv.js";
+import { constants } from "@/constants.js";
 
 const WHATSAPP_GRAPH_BASE_URL = "https://graph.facebook.com/v24.0";
 
@@ -11,10 +12,19 @@ export const sendWhatsappOtp = async (phone: string, otp: string, reason: string
     messaging_product: "whatsapp",
     recipient_type: "individual",
     to: phone,
-    type: "text" as const,
-    text: {
-      preview_url: false,
-      body: `Your verification code is ${otp} for ${reason}. It will expire in a few minutes. Do not share this code with anyone.`,
+    type: "template",
+    template: {
+      name: constants.WHATSAPP_OTP_TEMPLATE_NAME,
+      language: { code: "en_US" },
+      components: [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: otp },
+            { type: "text", text: constants.OTP_EXPIRY },
+          ],
+        },
+      ],
     },
   };
 
@@ -44,4 +54,4 @@ export const sendWhatsappOtp = async (phone: string, otp: string, reason: string
   return data;
 };
 
-// await sendWhatsappOtp("+917631189755", "123456", "discount");
+// await sendWhatsappOtp("917631189755", "123456", "login");

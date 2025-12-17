@@ -7,6 +7,8 @@ export const constants = {
   OTP_EXPIRY: 300,
   OTP_LENGTH: 6,
   MAX_ATTEMPTS: 3,
+
+  WHATSAPP_OTP_TEMPLATE_NAME: "reference_code",
 };
 
 export const otpContansts = {
