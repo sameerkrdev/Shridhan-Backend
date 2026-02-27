@@ -6,9 +6,33 @@ import logger from "@/config/logger.js";
 import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
 import otpRouter from "@/routes/otpRoutes.js";
+import cors from "cors";
+import type { IAuthorizedRequest } from "@/types/authType.js";
 
-const app = express();
+const app: express.Express = express();
 app.use(express.json());
+app.use((req: Request, _res: Response, next: NextFunction) => {
+  const cookieHeader = req.headers.cookie;
+  const parsedCookies: Record<string, string> = {};
+
+  if (cookieHeader) {
+    cookieHeader.split(";").forEach((pair) => {
+      const [rawKey, ...rawValue] = pair.trim().split("=");
+      if (!rawKey) return;
+      parsedCookies[rawKey] = decodeURIComponent(rawValue.join("="));
+    });
+  }
+
+  (req as IAuthorizedRequest).cookies = parsedCookies;
+  next();
+});
+
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  }),
+);
 
 // Morgan logs HTTP requests
 app.use(morgan("combined"));
@@ -120,7 +144,10 @@ app.use((err: HttpError, req: Request, res: Response, _next: NextFunction) => {
       params: req.params,
       query: req.query,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      body: { ...req.body, ...((req.body as { password: string }).password && { password: null }) },
+      body: {
+        ...req.body,
+        ...((req.body as { password: string })?.password && { password: null }),
+      },
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       details: err.details,

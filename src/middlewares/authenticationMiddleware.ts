@@ -2,17 +2,18 @@ import prisma from "@/config/prisma.js";
 import { constants } from "@/constants.js";
 import { verifyAccessToken } from "@/services/authTokenService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
-import type { Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import createHttpError from "http-errors";
 
 export const authenticaionMiddleware = () => {
-  return async (req: IAuthorizedRequest, _: Response, next: NextFunction) => {
+  return async (req: Request, _: Response, next: NextFunction) => {
     try {
       const headerToken = req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.split(" ")[1]
         : undefined;
 
-      const token = req.cookies[constants.ACCESS_COOKIE_NAME] ?? headerToken;
+      const token =
+        (req as IAuthorizedRequest).cookies?.[constants.ACCESS_COOKIE_NAME] ?? headerToken;
 
       if (!token) {
         throw createHttpError(401, "Access token missing");
@@ -45,8 +46,9 @@ export const authenticaionMiddleware = () => {
       }
 
       // 3) Attach data
-      req.member = member;
-      req.session = session.id; // ← useful for logout device
+      const authorizedReq = req as Request & { member: typeof member; session: string };
+      authorizedReq.member = member;
+      authorizedReq.session = session.id; // ← useful for logout device
 
       next();
     } catch (error) {

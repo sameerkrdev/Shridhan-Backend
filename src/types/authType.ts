@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma/client.js";
 import type {
   CreateFirstMemberValidationSchema,
   LoginValidationSchema,
+  RefreshValidationSchema,
 } from "@/zodValidationSchema/memberValidationSchema.js";
 import type { Request } from "express";
 
@@ -11,6 +12,10 @@ export interface ISignupMemberRequest extends Request {
 
 export interface ILoginMemberRequest extends Request {
   body: LoginValidationSchema["body"];
+}
+
+export interface IRefreshMemberRequest extends Request {
+  body: RefreshValidationSchema["body"] & { refreshToken?: string };
 }
 
 export interface IAccessTokenPayload {

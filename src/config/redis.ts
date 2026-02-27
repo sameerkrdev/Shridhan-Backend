@@ -5,7 +5,7 @@ import env from "@/config/dotenv.js";
 const redisOptions: RedisOptions = {
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
-  lazyConnect: false,
+  lazyConnect: true,
 };
 
 export const redisClient = new Redis(env.REDIS_URI, redisOptions);

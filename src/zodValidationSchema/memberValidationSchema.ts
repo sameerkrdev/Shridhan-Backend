@@ -15,8 +15,15 @@ export type CreateFirstMemberValidationSchema = z.infer<typeof createFirstMember
 export const loginValidationSchema = z.object({
   body: z.object({
     phone: z.string().min(10, "Phone is required"),
-    societyId: z.uuid(),
   }),
 });
 
 export type LoginValidationSchema = z.infer<typeof loginValidationSchema>;
+
+export const refreshValidationSchema = z.object({
+  body: z.object({
+    refreshToken: z.string().min(1, "Refresh token is required").optional(),
+  }),
+});
+
+export type RefreshValidationSchema = z.infer<typeof refreshValidationSchema>;

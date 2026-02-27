@@ -11,7 +11,7 @@ export const sendWhatsappOtp = async (phone: string, otp: string, reason: string
   const body = {
     messaging_product: "whatsapp",
     recipient_type: "individual",
-    to: phone,
+    to: `91${phone}`,
     type: "template",
     template: {
       name: constants.WHATSAPP_OTP_TEMPLATE_NAME,
@@ -20,6 +20,7 @@ export const sendWhatsappOtp = async (phone: string, otp: string, reason: string
         {
           type: "body",
           parameters: [
+            { type: "text", text: "USER_NAME" },
             { type: "text", text: otp },
             { type: "text", text: constants.OTP_EXPIRY },
           ],

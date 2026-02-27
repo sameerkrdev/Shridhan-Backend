@@ -8,7 +8,8 @@ export const constants = {
   OTP_LENGTH: 6,
   MAX_ATTEMPTS: 3,
 
-  WHATSAPP_OTP_TEMPLATE_NAME: "reference_code",
+  WHATSAPP_OTP_TEMPLATE_NAME: "jaspers_market_order_confirmation_v1",
+  // WHATSAPP_OTP_TEMPLATE_NAME: "reference_code",
 };
 
 export const otpContansts = {

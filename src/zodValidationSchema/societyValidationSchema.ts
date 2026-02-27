@@ -16,3 +16,13 @@ export const onboardSocietyValidationSchema = z.object({
 });
 
 export type OnboardSocietyValidationSchema = z.infer<typeof onboardSocietyValidationSchema>;
+
+export const resolveMemberSocietyValidationSchema = z.object({
+  body: z.object({
+    societyId: z.uuid(),
+  }),
+});
+
+export type ResolveMemberSocietyValidationSchema = z.infer<
+  typeof resolveMemberSocietyValidationSchema
+>;

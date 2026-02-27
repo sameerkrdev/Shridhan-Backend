@@ -67,12 +67,9 @@ enum ServiceType {
 
 enum SocietyStatus {
   CREATED
-  TRIAL
+  PERMIT_PENDING
+  RAZORPAY_PENDING
   ACTIVE
-  GRACE
-  EXPIRED
-  SUSPENDED
-  BLOCKED
 }
 
 enum PaymentMethod {
