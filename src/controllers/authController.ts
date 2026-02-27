@@ -1,6 +1,10 @@
 import env from "@/config/dotenv.js";
 import { constants } from "@/constants.js";
-import { createFirstMember, loginMember as loginMemberService } from "@/services/authService.js";
+import {
+  checkMemberPhoneExists,
+  createFirstMember,
+  loginMember as loginMemberService,
+} from "@/services/authService.js";
 import prisma from "@/config/prisma.js";
 import {
   refreshTokens as refreshTokensService,
@@ -10,6 +14,7 @@ import {
 import createHttpError from "http-errors";
 import type {
   ILoginMemberRequest,
+  IMemberExistsRequest,
   IRefreshMemberRequest,
   ISignupMemberRequest,
 } from "@/types/authType.js";
@@ -208,6 +213,19 @@ export const logout = async (req: IRefreshMemberRequest, res: Response, next: Ne
     res.clearCookie(constants.REFRESH_COOKIE_NAME, { path: "/" });
 
     res.status(200).json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const checkMemberExists = async (
+  req: IMemberExistsRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const exists = await checkMemberPhoneExists(req.body.phone);
+    res.status(200).json({ exists });
   } catch (error) {
     next(error);
   }

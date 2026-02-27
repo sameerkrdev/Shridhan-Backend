@@ -26,3 +26,11 @@ export const resolveMemberSocietyValidationSchema = z.object({
 export type ResolveMemberSocietyValidationSchema = z.infer<
   typeof resolveMemberSocietyValidationSchema
 >;
+
+export const setupPermitRulesValidationSchema = z.object({
+  body: z.object({
+    societyId: z.uuid(),
+  }),
+});
+
+export type SetupPermitRulesValidationSchema = z.infer<typeof setupPermitRulesValidationSchema>;

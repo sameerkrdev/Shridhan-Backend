@@ -6,6 +6,7 @@ import logger from "@/config/logger.js";
 import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
 import otpRouter from "@/routes/otpRoutes.js";
+import accessControlRouter from "@/routes/accessControlRoutes.js";
 import cors from "cors";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 
@@ -40,6 +41,7 @@ app.use(morgan("combined"));
 app.use("/api/v1/members", memberRouter);
 app.use("/api/v1/societies", societyRouter);
 app.use("/api/v1/otp", otpRouter);
+app.use("/api/v1/access-control", accessControlRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });

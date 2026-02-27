@@ -129,3 +129,16 @@ export const loginMember = async (
     throw error;
   }
 };
+
+export const checkMemberPhoneExists = async (phone: string): Promise<boolean> => {
+  try {
+    const member = await prisma.member.findFirst({
+      where: { phone },
+      select: { id: true },
+    });
+
+    return Boolean(member);
+  } catch (error) {
+    throw error;
+  }
+};

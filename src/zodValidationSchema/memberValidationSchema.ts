@@ -27,3 +27,11 @@ export const refreshValidationSchema = z.object({
 });
 
 export type RefreshValidationSchema = z.infer<typeof refreshValidationSchema>;
+
+export const memberExistsValidationSchema = z.object({
+  body: z.object({
+    phone: z.string().min(10, "Phone is required"),
+  }),
+});
+
+export type MemberExistsValidationSchema = z.infer<typeof memberExistsValidationSchema>;

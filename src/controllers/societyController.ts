@@ -3,10 +3,12 @@ import {
   createSociety,
   getMemberSocieties,
   resolveMemberSociety,
+  setupSocietyPermitRules,
 } from "@/services/societyService.js";
 import type {
   IOnboardSocietyRequest,
   IResolveMemberSocietyRequest,
+  ISetupPermitRulesRequest,
   ISocietyMemberRequest,
 } from "@/types/society.js";
 import type { Response, NextFunction } from "express";
@@ -66,6 +68,19 @@ export const resolveSelectedSociety = async (
     const { societyId } = req.body;
     const result = await resolveMemberSociety(req.member.phone, societyId);
 
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setupPermitRules = async (
+  req: ISetupPermitRulesRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const result = await setupSocietyPermitRules(req.member.phone, req.body.societyId);
     res.json(result);
   } catch (error) {
     next(error);
