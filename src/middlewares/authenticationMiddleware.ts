@@ -25,17 +25,15 @@ export const authenticaionMiddleware = () => {
         throw createHttpError(401, "Invalid or expired token");
       }
 
-      // 1) User must exist
-      const member = await prisma.member.findUnique({
+      const user = await prisma.user.findUnique({
         where: { id: tokenData.sub },
       });
-      if (!member) throw createHttpError(401, "Invalid user");
+      if (!user) throw createHttpError(401, "Invalid user");
 
-      // 2) Ensure device/session exists and is not revoked
       const session = await prisma.refreshToken.findFirst({
         where: {
           id: tokenData.tokenId,
-          memberId: tokenData.sub,
+          userId: tokenData.sub,
           isRevoked: false,
           expiresAt: { gt: new Date() },
         },
@@ -45,10 +43,27 @@ export const authenticaionMiddleware = () => {
         throw createHttpError(401, "Session revoked. Please login again.");
       }
 
-      // 3) Attach data
-      const authorizedReq = req as Request & { member: typeof member; session: string };
-      authorizedReq.member = member;
-      authorizedReq.session = session.id; // ← useful for logout device
+      const authorizedReq = req as unknown as IAuthorizedRequest;
+      authorizedReq.user = user;
+      authorizedReq.session = session.id;
+
+      const societyId =
+        (req.headers["x-society-id"] as string | undefined) ??
+        (req.query.societyId as string | undefined);
+
+      if (societyId) {
+        const membership = await prisma.membership.findFirst({
+          where: {
+            userId: user.id,
+            societyId,
+            deletedAt: null,
+          },
+        });
+
+        if (membership) {
+          authorizedReq.membership = membership;
+        }
+      }
 
       next();
     } catch (error) {

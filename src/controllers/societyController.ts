@@ -1,15 +1,21 @@
 import { SocietyStatus } from "@/generated/prisma/client.js";
 import {
   createSociety,
+  getSocietyBillingOverview,
   getMemberSocieties,
   resolveMemberSociety,
+  setupSocietyFeePaymentLink,
+  setupSocietySubscriptionMandate,
   setupSocietyPermitRules,
 } from "@/services/societyService.js";
 import type {
   IOnboardSocietyRequest,
   IResolveMemberSocietyRequest,
   ISetupPermitRulesRequest,
-  ISocietyMemberRequest,
+  ISetupSubscriptionRequest,
+  ICreateSetupFeePaymentLinkRequest,
+  IGetSocietyBillingOverviewRequest,
+  ISocietyUserRequest,
 } from "@/types/society.js";
 import type { Response, NextFunction } from "express";
 
@@ -31,14 +37,10 @@ export const onboardSociety = async (
         zipcode,
         logoUrl,
         status: SocietyStatus.CREATED,
-        createdBy: req.member.id,
+        createdBy: req.user.id,
       },
-      req.member,
+      req.user,
     );
-
-    // permit pre-defined role creation and first user ko full accesss
-
-    // razorpay payment url
 
     res.json(payload);
   } catch (error) {
@@ -47,13 +49,13 @@ export const onboardSociety = async (
 };
 
 export const listMemberSocieties = async (
-  req: ISocietyMemberRequest,
+  req: ISocietyUserRequest,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const societies = await getMemberSocieties(req.member.phone);
-    res.json({ societies });
+    const memberships = await getMemberSocieties(req.user.id);
+    res.json({ memberships });
   } catch (error) {
     next(error);
   }
@@ -66,8 +68,7 @@ export const resolveSelectedSociety = async (
 ) => {
   try {
     const { societyId } = req.body;
-    const result = await resolveMemberSociety(req.member.phone, societyId);
-
+    const result = await resolveMemberSociety(req.user.id, societyId);
     res.json(result);
   } catch (error) {
     next(error);
@@ -80,7 +81,46 @@ export const setupPermitRules = async (
   next: NextFunction,
 ) => {
   try {
-    const result = await setupSocietyPermitRules(req.member.phone, req.body.societyId);
+    const result = await setupSocietyPermitRules(req.user.id, req.body.societyId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setupSubscription = async (
+  req: ISetupSubscriptionRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const result = await setupSocietySubscriptionMandate(req.user.id, req.body.societyId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createSetupFeeLink = async (
+  req: ICreateSetupFeePaymentLinkRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const result = await setupSocietyFeePaymentLink(req.user.id, req.body.societyId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getBillingOverview = async (
+  req: IGetSocietyBillingOverviewRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const result = await getSocietyBillingOverview(req.user.id, req.params.societyId);
     res.json(result);
   } catch (error) {
     next(error);

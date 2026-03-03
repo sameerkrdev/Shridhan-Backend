@@ -34,3 +34,31 @@ export const setupPermitRulesValidationSchema = z.object({
 });
 
 export type SetupPermitRulesValidationSchema = z.infer<typeof setupPermitRulesValidationSchema>;
+
+export const setupSubscriptionValidationSchema = z.object({
+  body: z.object({
+    societyId: z.uuid(),
+  }),
+});
+
+export type SetupSubscriptionValidationSchema = z.infer<typeof setupSubscriptionValidationSchema>;
+
+export const createSetupFeePaymentLinkValidationSchema = z.object({
+  body: z.object({
+    societyId: z.uuid(),
+  }),
+});
+
+export type CreateSetupFeePaymentLinkValidationSchema = z.infer<
+  typeof createSetupFeePaymentLinkValidationSchema
+>;
+
+export const getSocietyBillingOverviewValidationSchema = z.object({
+  params: z.object({
+    societyId: z.uuid(),
+  }),
+});
+
+export type GetSocietyBillingOverviewValidationSchema = z.infer<
+  typeof getSocietyBillingOverviewValidationSchema
+>;

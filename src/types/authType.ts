@@ -1,36 +1,36 @@
 import type { Prisma } from "@/generated/prisma/client.js";
 import type {
-  CreateFirstMemberValidationSchema,
+  CreateFirstUserValidationSchema,
   LoginValidationSchema,
-  MemberExistsValidationSchema,
+  UserExistsValidationSchema,
   RefreshValidationSchema,
 } from "@/zodValidationSchema/memberValidationSchema.js";
 import type { Request } from "express";
 
-export interface ISignupMemberRequest extends Request {
-  body: CreateFirstMemberValidationSchema["body"];
+export interface ISignupUserRequest extends Request {
+  body: CreateFirstUserValidationSchema["body"];
 }
 
-export interface ILoginMemberRequest extends Request {
+export interface ILoginUserRequest extends Request {
   body: LoginValidationSchema["body"];
 }
 
-export interface IRefreshMemberRequest extends Request {
+export interface IRefreshUserRequest extends Request {
   body: RefreshValidationSchema["body"] & { refreshToken?: string };
 }
 
-export interface IMemberExistsRequest extends Request {
-  body: MemberExistsValidationSchema["body"];
+export interface IUserExistsRequest extends Request {
+  body: UserExistsValidationSchema["body"];
 }
 
 export interface IAccessTokenPayload {
-  sub: string; // Member Id
+  sub: string;
   tokenId: string;
   type: "access";
 }
 
 export interface IRefreshTokenPayload {
-  sub: string; // Member Id
+  sub: string;
   type: "refresh";
   tokenId: string;
 }
@@ -42,7 +42,8 @@ export interface IDeviceInfo {
 }
 
 export interface IAuthorizedRequest extends Request {
-  member: Prisma.MemberModel;
+  user: Prisma.UserModel;
+  membership?: Prisma.MembershipModel;
   session: string;
   cookies: Record<string, string>;
 }

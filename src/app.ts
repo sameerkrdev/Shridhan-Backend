@@ -6,31 +6,21 @@ import logger from "@/config/logger.js";
 import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
 import otpRouter from "@/routes/otpRoutes.js";
-import accessControlRouter from "@/routes/accessControlRoutes.js";
+import webhookRouter from "@/routes/webhookRoutes.js";
+import membershipRouter from "@/routes/membershipRoutes.js";
+import userRouter from "@/routes/userRoutes.js";
+import internalBillingRouter from "@/routes/internalBillingRoutes.js";
 import cors from "cors";
-import type { IAuthorizedRequest } from "@/types/authType.js";
+import cookieParser from "cookie-parser";
 
 const app: express.Express = express();
+app.use("/api/v1/webhooks", webhookRouter);
 app.use(express.json());
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  const cookieHeader = req.headers.cookie;
-  const parsedCookies: Record<string, string> = {};
-
-  if (cookieHeader) {
-    cookieHeader.split(";").forEach((pair) => {
-      const [rawKey, ...rawValue] = pair.trim().split("=");
-      if (!rawKey) return;
-      parsedCookies[rawKey] = decodeURIComponent(rawValue.join("="));
-    });
-  }
-
-  (req as IAuthorizedRequest).cookies = parsedCookies;
-  next();
-});
+app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "https://62b7-47-31-92-61.ngrok-free.app"],
     credentials: true,
   }),
 );
@@ -41,7 +31,9 @@ app.use(morgan("combined"));
 app.use("/api/v1/members", memberRouter);
 app.use("/api/v1/societies", societyRouter);
 app.use("/api/v1/otp", otpRouter);
-app.use("/api/v1/access-control", accessControlRouter);
+app.use("/api/v1/memberships", membershipRouter);
+app.use("/api/v1/users", userRouter);
+app.use("/api/v1/internal/billing", internalBillingRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });

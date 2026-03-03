@@ -67,7 +67,6 @@ enum ServiceType {
 
 enum SocietyStatus {
   CREATED
-  PERMIT_PENDING
   RAZORPAY_PENDING
   ACTIVE
 }
@@ -106,15 +105,12 @@ model Society {
   planSettings SocietyPlanSettings?
 
   customers                         Customer[]
-  members                           Member[]
-  permissions                       SocietyPermission[]
+  memberships                       Membership[]
   roles                             SocietyRole[]
   subscriptions                     Subscription[]
   recurringDepositProjectType       RecurringDepositProjectType[]
   monthlyInterestSchemeProjectTypes MonthlyInterestSchemeProjectType[]
   fixedDepositProjectType           FixedDepositProjectType[]
-
-  permitTenantKey String?
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -136,19 +132,41 @@ model SocietyPlanSettings {
   society   Society @relation(fields: [societyId], references: [id])
 
   // e.g. max customers allowed for plan, trial info, plan reference to billing system
-  planId       String? // external plan id (Razorpay)
-  planName     String?
-  planAmount   Decimal?  @db.Decimal(14, 2)
-  currency     String?   @default("INR")
-  maxCustomers Int? // limit imposed by plan
-  isTrialUsed  Boolean   @default(false)
-  trialEndDate DateTime?
-  graceUntil   DateTime?
+  planId                   String? // external plan id (Razorpay)
+  planName                 String?
+  planAmount               Decimal?  @db.Decimal(14, 2)
+  currency                 String?   @default("INR")
+  maxCustomers             Int? // limit imposed by plan
+  isTrialUsed              Boolean   @default(false)
+  trialEndDate             DateTime?
+  graceUntil               DateTime?
+  developerOverrideEnabled Boolean   @default(false)
+
+  setupFeeEnabled        Boolean   @default(true)
+  setupFeeAmount         Decimal   @default(50000) @db.Decimal(14, 2)
+  setupFeeDueAt          DateTime?
+  setupFeePaid           Boolean   @default(false)
+  setupFeePaidAt         DateTime?
+  setupFeePaymentId      String?   @unique
+  setupFeePaymentLinkId  String?
+  setupFeePaymentLinkUrl String?
+
+  customOneTimeFeeEnabled       Boolean   @default(false)
+  customOneTimeFeeAmount        Decimal?  @db.Decimal(14, 2)
+  customOneTimeFeeWaived        Boolean   @default(false)
+  customSubscriptionEnabled     Boolean   @default(false)
+  customSubscriptionPlanId      String?
+  customSubscriptionAmount      Decimal?  @db.Decimal(14, 2)
+  customSubscriptionWaived      Boolean   @default(false)
+  billingPolicySetByDeveloperId String?
+  billingPolicySetReason        String?
+  billingPolicyUpdatedAt        DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([societyId])
+  @@index([setupFeePaid])
 }
 
 model Subscription {
@@ -168,7 +186,6 @@ model Subscription {
   // Subscription lifecycle
   status            SubscriptionStatus
   startDate         DateTime
-  endDate           DateTime?
   nextBillingAt     DateTime
   previousBillingAt DateTime?
 
@@ -180,9 +197,8 @@ model Subscription {
   mandateUpdatedAt DateTime?
 
   // Payment retry / failures
-  authAttempts Int @default(0)
-  retryCount   Int @default(0)
-  maxRetries   Int @default(3)
+  retryCount Int @default(0)
+  maxRetries Int @default(3)
 
   // Grace period (when auto-debit fails)
   isInGrace    Boolean   @default(false)
@@ -191,7 +207,8 @@ model Subscription {
   societyId String
   society   Society @relation(fields: [societyId], references: [id])
 
-  transactions SubscriptionTransaction[]
+  transactions   SubscriptionTransaction[]
+  transitionLogs SubscriptionStateTransition[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -226,119 +243,79 @@ model SubscriptionTransaction {
   @@index([status])
 }
 
-model Member {
-  id    String  @id @default(uuid())
-  name  String
-  email String?
-  phone String
-  role  String
-  permitUserKey String?
+model SubscriptionStateTransition {
+  id String @id @default(uuid())
 
-  societyId String?
-  society   Society? @relation(fields: [societyId], references: [id])
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
 
-  refreshTokens RefreshToken[]
-  customers     Customer[]
-  assignedRoles SocietyMemberRole[]
-
-  // soft delete + audit
-  isDeleted Boolean   @default(false)
-  deletedAt DateTime?
-
-  createdBy String?
-  updatedBy String?
+  fromStatus SubscriptionStatus
+  toStatus   SubscriptionStatus
+  reason     String
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  @@unique([societyId, phone])
-  @@index([societyId])
-  @@index([phone])
+  @@index([subscriptionId])
+  @@index([createdAt])
 }
 
-model SocietyPermission {
-  id   String @id @default(uuid())
-  name String
+model User {
+  id            String  @id @default(cuid())
+  name          String
+  email         String  @unique
+  phone         String  @unique
+  avatar        String?
 
-  description         String?
-  permitPermissionKey String
-
-  societyId String
-  society   Society @relation(fields: [societyId], references: [id])
-
-  roles SocietyRolePermission[]
-
-  createdBy String
-  updatedBy String?
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([societyId, name])
+  @@index([phone])
+  @@index([email])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  societyId String
+  society   Society  @relation(fields: [societyId], references: [id])
+  roleId    String
+  role      SocietyRole @relation(fields: [roleId], references: [id])
+  status    String   @default("active")
+
+  customers Customer[]
+
+  deletedAt DateTime?
+  joinedAt  DateTime  @default(now())
+
+  @@unique([userId, societyId])
+  @@index([userId])
   @@index([societyId])
 }
 
 model SocietyRole {
-  id   String @id @default(uuid())
-  name String
+  id          String   @id @default(cuid())
+  societyId   String
+  name        String
+  isSystem    Boolean  @default(false)
+  permissions String[]
+  createdAt   DateTime @default(now())
 
-  description   String?
-  isSystem      Boolean @default(false)
-  permitRoleKey String
-
-  societyId String
-  society   Society @relation(fields: [societyId], references: [id])
-
-  permissions SocietyRolePermission[]
-  members     SocietyMemberRole[]
-
-  createdBy String
-  updatedBy String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  society      Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  memberships  Membership[]
 
   @@unique([societyId, name])
   @@index([societyId])
 }
 
-model SocietyRolePermission {
-  id String @id @default(uuid())
-
-  roleId       String
-  role         SocietyRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permissionId String
-  permission   SocietyPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@unique([roleId, permissionId])
-  @@index([roleId])
-  @@index([permissionId])
-}
-
-model SocietyMemberRole {
-  id String @id @default(uuid())
-
-  memberId String
-  member   Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  roleId   String
-  role     SocietyRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@unique([memberId, roleId])
-  @@index([memberId])
-  @@index([roleId])
-}
-
-// Add to your schema
 model RefreshToken {
   id        String   @id @default(uuid())
   expiresAt DateTime
   isRevoked Boolean  @default(false)
 
-  // Track device/session info
   deviceId  String?
   userAgent String?
   ipAddress String?
@@ -346,10 +323,10 @@ model RefreshToken {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberId String
-  member   Member @relation(fields: [memberId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  @@index([memberId])
+  @@index([userId])
   @@index([expiresAt])
 }
 
@@ -370,8 +347,8 @@ model Customer {
   societyId String
   society   Society @relation(fields: [societyId], references: [id])
 
-  memberId String
-  member   Member @relation(fields: [memberId], references: [id])
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id])
 
   nominees          Nominee[]
   loans             Loan[]
@@ -390,7 +367,7 @@ model Customer {
   updatedAt DateTime @updatedAt
 
   @@index([societyId])
-  @@index([memberId])
+  @@index([membershipId])
   @@index([phone])
 }
 

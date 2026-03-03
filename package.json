@@ -57,9 +57,11 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.11",
     "nodemon": "^3.1.11",
     "permitio": "^2.7.5",
+    "razorpay": "^2.9.6",
     "winston": "^3.18.3",
     "zod": "^4.1.13"
   },

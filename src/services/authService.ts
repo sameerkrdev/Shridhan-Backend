@@ -5,140 +5,183 @@ import { generateTokenPair } from "@/services/authTokenService.js";
 
 type AuthRouteIntent = "CREATE_NEW_SOCIETY" | "SOCIETY_SELECTOR";
 
-interface MemberSocietySummary {
-  memberId: string;
+interface MembershipSummary {
+  membershipId: string;
   societyId: string;
   role: string;
+  roleId: string;
+  permissions: string[];
+  status: string;
   societyName: string;
   subDomainName: string;
-  status: string;
+  societyStatus: string;
 }
 
-const mapMemberSocieties = (
-  members: (Prisma.MemberModel & {
-    society: {
-      id: string;
-      name: string;
-      subDomainName: string;
-      status: string;
-    } | null;
+const mapMemberships = (
+  memberships: (Prisma.MembershipModel & {
+    society: { id: string; name: string; subDomainName: string; status: string };
+    role: { name: string; permissions: string[] };
   })[],
-) => {
-  return members
-    .filter((member) => member.societyId && member.society)
-    .map(
-      (member): MemberSocietySummary => ({
-        memberId: member.id,
-        societyId: member.societyId!,
-        role: member.role,
-        societyName: member.society?.name ?? "",
-        subDomainName: member.society?.subDomainName ?? "",
-        status: member.society?.status ?? "",
-      }),
-    );
+): MembershipSummary[] => {
+  return memberships.map((m) => ({
+    membershipId: m.id,
+    societyId: m.societyId,
+    role: m.role.name,
+    roleId: m.roleId,
+    permissions: m.role.permissions,
+    status: m.status,
+    societyName: m.society.name,
+    subDomainName: m.society.subDomainName,
+    societyStatus: m.society.status,
+  }));
 };
 
-export const createFirstMember = async (
-  data: Prisma.MemberCreateInput,
-): Promise<{
-  member: Prisma.MemberModel;
+export const createFirstUser = async (data: {
+  name: string;
+  phone: string;
+  email: string;
+}): Promise<{
+  user: { id: string; name: string; phone: string; email: string | null; avatar: string | null };
   accessToken: string;
   refreshToken: string;
   routeIntent: AuthRouteIntent;
-  societies: MemberSocietySummary[];
+  memberships: MembershipSummary[];
 }> => {
-  try {
-    const existingMembers = await prisma.member.findMany({
-      where: {
-        OR: [{ phone: data.phone }, ...(data.email ? [{ email: data.email }] : [])],
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      OR: [{ phone: data.phone }, { email: data.email }],
+    },
+  });
+
+  if (existingUser) {
+    const { accessToken, refreshToken } = await generateTokenPair(existingUser.id);
+    const memberships = await prisma.membership.findMany({
+      where: { userId: existingUser.id, deletedAt: null },
+      include: {
+        society: { select: { id: true, name: true, subDomainName: true, status: true } },
+        role: { select: { name: true, permissions: true } },
       },
     });
-
-    if (existingMembers.length > 0) {
-      const sessionMember = existingMembers[0] as Prisma.MemberModel;
-      const { accessToken, refreshToken } = await generateTokenPair(sessionMember.id);
-      const memberships = await prisma.member.findMany({
-        where: { phone: sessionMember.phone, societyId: { not: null } },
-        include: { society: true },
-      });
-
-      return {
-        member: sessionMember,
-        accessToken,
-        refreshToken,
-        routeIntent: "SOCIETY_SELECTOR",
-        societies: mapMemberSocieties(memberships),
-      };
-    }
-
-    const createdMember = await prisma.member.create({
-      data: {
-        ...data,
-        role: "SUPER_ADMIN",
-      },
-    });
-
-    const { accessToken, refreshToken } = await generateTokenPair(createdMember.id);
 
     return {
-      member: createdMember,
+      user: {
+        id: existingUser.id,
+        name: existingUser.name,
+        phone: existingUser.phone,
+        email: existingUser.email,
+        avatar: existingUser.avatar,
+      },
       accessToken,
       refreshToken,
-      routeIntent: "CREATE_NEW_SOCIETY",
-      societies: [],
+      routeIntent: memberships.length > 0 ? "SOCIETY_SELECTOR" : "CREATE_NEW_SOCIETY",
+      memberships: mapMemberships(memberships),
     };
-  } catch (error) {
-    throw error;
   }
+
+  const createdUser = await prisma.user.create({
+    data: {
+      name: data.name,
+      phone: data.phone,
+      email: data.email,
+    },
+  });
+
+  const { accessToken, refreshToken } = await generateTokenPair(createdUser.id);
+
+  return {
+    user: {
+      id: createdUser.id,
+      name: createdUser.name,
+      phone: createdUser.phone,
+      email: createdUser.email,
+      avatar: createdUser.avatar,
+    },
+    accessToken,
+    refreshToken,
+    routeIntent: "CREATE_NEW_SOCIETY",
+    memberships: [],
+  };
 };
 
-export const loginMember = async (
+export const loginUser = async (
   phone: string,
 ): Promise<{
-  member: Prisma.MemberModel;
+  user: { id: string; name: string; phone: string; email: string | null; avatar: string | null };
   accessToken: string;
   refreshToken: string;
   routeIntent: AuthRouteIntent;
-  societies: MemberSocietySummary[];
+  memberships: MembershipSummary[];
 }> => {
-  try {
-    const members = await prisma.member.findMany({
-      where: { phone },
-      include: { society: true },
-    });
+  const user = await prisma.user.findUnique({ where: { phone } });
 
-    if (!members.length) {
-      const error = createHttpError(404, "Member doesn't exists", {
-        details: { phone },
-      });
-      throw error;
-    }
-
-    const sessionMember = members[0] as Prisma.MemberModel & { society: unknown };
-    const { society: _society, ...member } = sessionMember; // eslint-disable-line @typescript-eslint/no-unused-vars
-    const { accessToken, refreshToken } = await generateTokenPair(sessionMember.id);
-
-    return {
-      member,
-      accessToken,
-      refreshToken,
-      routeIntent: "SOCIETY_SELECTOR",
-      societies: mapMemberSocieties(members),
-    };
-  } catch (error) {
-    throw error;
+  if (!user) {
+    throw createHttpError(404, "User doesn't exist", { details: { phone } });
   }
+
+  const { accessToken, refreshToken } = await generateTokenPair(user.id);
+
+  const memberships = await prisma.membership.findMany({
+    where: { userId: user.id, deletedAt: null },
+    include: {
+      society: { select: { id: true, name: true, subDomainName: true, status: true } },
+      role: { select: { name: true, permissions: true } },
+    },
+  });
+
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      email: user.email,
+      avatar: user.avatar,
+    },
+    accessToken,
+    refreshToken,
+    routeIntent: memberships.length > 0 ? "SOCIETY_SELECTOR" : "CREATE_NEW_SOCIETY",
+    memberships: mapMemberships(memberships),
+  };
 };
 
-export const checkMemberPhoneExists = async (phone: string): Promise<boolean> => {
-  try {
-    const member = await prisma.member.findFirst({
-      where: { phone },
-      select: { id: true },
-    });
+export const checkUserPhoneExists = async (phone: string): Promise<boolean> => {
+  const user = await prisma.user.findUnique({
+    where: { phone },
+    select: { id: true },
+  });
+  return Boolean(user);
+};
 
-    return Boolean(member);
-  } catch (error) {
-    throw error;
-  }
+export const getSessionPayload = async (
+  userId: string,
+): Promise<{
+  user: {
+    id: string;
+    name: string;
+    phone: string;
+    email: string | null;
+    avatar: string | null;
+  };
+  routeIntent: AuthRouteIntent;
+  memberships: MembershipSummary[];
+} | null> => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, phone: true, email: true, avatar: true },
+  });
+
+  if (!user) return null;
+
+  const memberships = await prisma.membership.findMany({
+    where: { userId: user.id, deletedAt: null },
+    include: {
+      society: { select: { id: true, name: true, subDomainName: true, status: true } },
+      role: { select: { name: true, permissions: true } },
+    },
+  });
+
+  return {
+    user,
+    routeIntent: memberships.length > 0 ? "SOCIETY_SELECTOR" : "CREATE_NEW_SOCIETY",
+    memberships: mapMemberships(memberships),
+  };
 };
