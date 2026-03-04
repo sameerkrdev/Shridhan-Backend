@@ -419,6 +419,7 @@ model FixedDepositProjectType {
 model FixDeposit {
   id String @id @default(uuid())
 
+  principalAmount Decimal  @db.Decimal(14, 2)
   startDate      DateTime
   maturityAmount Decimal  @db.Decimal(14, 2)
   maturityDate   DateTime
@@ -431,6 +432,7 @@ model FixDeposit {
   customer      Customer                @relation(fields: [customerId], references: [id])
 
   transactions FixDepositTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -444,6 +446,7 @@ model FixDeposit {
 
   @@index([projectTypeId])
   @@index([customerId])
+  @@index([maturityDate])
 }
 
 model FixDepositTransaction {
@@ -474,6 +477,51 @@ model FixDepositTransaction {
 
   @@index([fixDepositId])
   @@index([transactionId])
+  @@index([createdAt])
+}
+
+model ServiceDocument {
+  id String @id @default(uuid())
+
+  serviceType     ServiceType
+  serviceEntityId String
+
+  fileName    String
+  displayName String
+  objectKey   String @unique
+  fileUrl     String
+  contentType String?
+  sizeBytes   Int?
+  isUploaded  Boolean @default(false)
+
+  fixDepositId String?
+  fixDeposit   FixDeposit? @relation(fields: [fixDepositId], references: [id])
+
+  recurringDepositId String?
+  recurringDeposit   RecurringDeposit? @relation(fields: [recurringDepositId], references: [id])
+
+  monthlyInterestSchemeId String?
+  monthlyInterestScheme   MonthlyInterestScheme? @relation(fields: [monthlyInterestSchemeId], references: [id])
+
+  loanId String?
+  loan   Loan? @relation(fields: [loanId], references: [id])
+
+  // soft delete + audit
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdBy String
+  updatedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fixDepositId])
+  @@index([isUploaded])
+  @@index([serviceType, serviceEntityId])
+  @@index([recurringDepositId])
+  @@index([monthlyInterestSchemeId])
+  @@index([loanId])
 }
 
 model MonthlyInterestSchemeProjectType {
@@ -521,6 +569,7 @@ model MonthlyInterestScheme {
   customer      Customer                         @relation(fields: [customerId], references: [id])
 
   transactions MonthlyInterestSchemeTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -619,6 +668,7 @@ model RecurringDeposit {
   customer   Customer @relation(fields: [customerId], references: [id])
 
   transactions RecurringDepositTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -672,7 +722,8 @@ model Loan {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  emi LoanEmi[]
+  emi       LoanEmi[]
+  documents ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)

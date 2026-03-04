@@ -1,4 +1,4 @@
-export type PermissionResource = "membership" | "society" | "role" | "user";
+export type PermissionResource = "membership" | "society" | "role" | "user" | "fixed_deposit";
 
 export interface PermissionResourceMeta {
   key: PermissionResource;
@@ -34,6 +34,11 @@ export const PERMISSION_RESOURCES: PermissionResourceMeta[] = [
     key: "user",
     label: "Profile",
     description: "Update personal profile details.",
+  },
+  {
+    key: "fixed_deposit",
+    label: "Fixed Deposit Management",
+    description: "Manage fixed deposit plans, accounts, and transactions.",
   },
 ];
 
@@ -128,6 +133,55 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     action: "update_self_only",
     label: "Edit Own Profile",
     description: "Update your own name, phone, or avatar.",
+  },
+  {
+    key: "fixed_deposit.create",
+    resource: "fixed_deposit",
+    action: "create",
+    label: "Create Fixed Deposits",
+    description: "Create fixed deposit project types and fixed deposit accounts.",
+  },
+  {
+    key: "fixed_deposit.read",
+    resource: "fixed_deposit",
+    action: "read",
+    label: "View Fixed Deposit",
+    description: "View details of a fixed deposit account.",
+  },
+  {
+    key: "fixed_deposit.list",
+    resource: "fixed_deposit",
+    action: "list",
+    label: "View Fixed Deposits",
+    description: "View all fixed deposit accounts and project types in the society.",
+  },
+  {
+    key: "fixed_deposit.add_transaction",
+    resource: "fixed_deposit",
+    action: "add_transaction",
+    label: "Add Fixed Deposit Transactions",
+    description: "Record new transactions for fixed deposit accounts.",
+  },
+  {
+    key: "fixed_deposit.update_status",
+    resource: "fixed_deposit",
+    action: "update_status",
+    label: "Update Fixed Deposit Status",
+    description: "Change status of fixed deposit accounts.",
+  },
+  {
+    key: "fixed_deposit.remove",
+    resource: "fixed_deposit",
+    action: "remove",
+    label: "Remove Fixed Deposit Accounts",
+    description: "Soft delete fixed deposit accounts.",
+  },
+  {
+    key: "fixed_deposit.remove_project_type",
+    resource: "fixed_deposit",
+    action: "remove_project_type",
+    label: "Remove Fixed Deposit Project Types",
+    description: "Soft delete fixed deposit project types.",
   },
 ];
 
