@@ -6,9 +6,29 @@ import logger from "@/config/logger.js";
 import memberRouter from "@/routes/authRoutes.js";
 import societyRouter from "@/routes/societyRoutes.js";
 import otpRouter from "@/routes/otpRoutes.js";
+import webhookRouter from "@/routes/webhookRoutes.js";
+import membershipRouter from "@/routes/membershipRoutes.js";
+import userRouter from "@/routes/userRoutes.js";
+import internalBillingRouter from "@/routes/internalBillingRoutes.js";
+import fixedDepositRouter from "@/routes/fixedDepositRoutes.js";
+import cors from "cors";
+import cookieParser from "cookie-parser";
 
-const app = express();
+const app: express.Express = express();
+app.use("/api/v1/webhooks", webhookRouter);
 app.use(express.json());
+app.use(cookieParser());
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://mbqgsv18-5173.inc1.devtunnels.ms",
+      "https://mbqgsv18-5801.inc1.devtunnels.ms",
+    ],
+    credentials: true,
+  }),
+);
 
 // Morgan logs HTTP requests
 app.use(morgan("combined"));
@@ -16,6 +36,10 @@ app.use(morgan("combined"));
 app.use("/api/v1/members", memberRouter);
 app.use("/api/v1/societies", societyRouter);
 app.use("/api/v1/otp", otpRouter);
+app.use("/api/v1/memberships", membershipRouter);
+app.use("/api/v1/users", userRouter);
+app.use("/api/v1/internal/billing", internalBillingRouter);
+app.use("/api/v1/fixed-deposits", fixedDepositRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });
@@ -120,7 +144,10 @@ app.use((err: HttpError, req: Request, res: Response, _next: NextFunction) => {
       params: req.params,
       query: req.query,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      body: { ...req.body, ...((req.body as { password: string }).password && { password: null }) },
+      body: {
+        ...req.body,
+        ...((req.body as { password: string })?.password && { password: null }),
+      },
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       details: err.details,

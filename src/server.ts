@@ -3,6 +3,7 @@ import app from "@/app.js";
 import logger from "@/config/logger.js";
 import redisClient from "@/config/redis.js";
 import type { Server } from "node:http";
+import { startBillingReminderScheduler } from "@/services/billingReminderScheduler.js";
 
 let server: Server;
 
@@ -74,6 +75,7 @@ const startServer = async () => {
     // Start HTTP server ONLY after Redis is ready
     server = app.listen(env.PORT, () => {
       logger.info(`Server running on port ${env.PORT}`);
+      startBillingReminderScheduler();
     });
   } catch (err) {
     logger.error("Startup failure:", err);

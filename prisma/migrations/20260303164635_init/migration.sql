@@ -1,10 +1,3 @@
-/*
-  Warnings:
-
-  - You are about to drop the `member` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `societies` table. If the table is not empty, all the data it contains will be lost.
-
-*/
 -- CreateEnum
 CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'PAUSED', 'CANCELLED', 'EXPIRED', 'PAYMENT_FAILED', 'PENDING_ACTIVATION');
 
@@ -33,34 +26,13 @@ CREATE TYPE "RecurringDepositTransactionType" AS ENUM ('CREDIT', 'PAYOUT');
 CREATE TYPE "ServiceType" AS ENUM ('FIX_DEPOSIT', 'RECURING_DEPOSIT', 'MONTHLY_INTEREST_SCHEME');
 
 -- CreateEnum
+CREATE TYPE "SocietyStatus" AS ENUM ('CREATED', 'RAZORPAY_PENDING', 'ACTIVE');
+
+-- CreateEnum
 CREATE TYPE "PaymentMethod" AS ENUM ('UPI', 'CASH', 'CHEQUE');
 
 -- CreateEnum
 CREATE TYPE "CustomerAccountType" AS ENUM ('LOAN', 'FIXED_DEPOSIT', 'MONTHLY_INTEREST_SCHEME', 'RECURING_DEPOSIT');
-
--- AlterEnum
--- This migration adds more than one value to an enum.
--- With PostgreSQL versions 11 and earlier, this is not possible
--- in a single migration. This can be worked around by creating
--- multiple migrations, each migration adding only one value to
--- the enum.
-
-
-ALTER TYPE "SocietyStatus" ADD VALUE 'TRIAL';
-ALTER TYPE "SocietyStatus" ADD VALUE 'ACTIVE';
-ALTER TYPE "SocietyStatus" ADD VALUE 'GRACE';
-ALTER TYPE "SocietyStatus" ADD VALUE 'EXPIRED';
-ALTER TYPE "SocietyStatus" ADD VALUE 'SUSPENDED';
-ALTER TYPE "SocietyStatus" ADD VALUE 'BLOCKED';
-
--- DropForeignKey
-ALTER TABLE "member" DROP CONSTRAINT "member_societyId_fkey";
-
--- DropTable
-DROP TABLE "member";
-
--- DropTable
-DROP TABLE "societies";
 
 -- CreateTable
 CREATE TABLE "Society" (
@@ -72,7 +44,7 @@ CREATE TABLE "Society" (
     "city" TEXT NOT NULL,
     "zipcode" TEXT NOT NULL,
     "logoUrl" TEXT NOT NULL,
-    "status" "SocietyStatus" NOT NULL,
+    "status" "SocietyStatus" NOT NULL DEFAULT 'CREATED',
     "isDeleted" BOOLEAN NOT NULL DEFAULT false,
     "deletedAt" TIMESTAMP(3),
     "createdBy" TEXT NOT NULL,
@@ -94,6 +66,23 @@ CREATE TABLE "SocietyPlanSettings" (
     "isTrialUsed" BOOLEAN NOT NULL DEFAULT false,
     "trialEndDate" TIMESTAMP(3),
     "graceUntil" TIMESTAMP(3),
+    "developerOverrideEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "setupFeeEnabled" BOOLEAN NOT NULL DEFAULT true,
+    "setupFeeAmount" DECIMAL(14,2) NOT NULL DEFAULT 50000,
+    "setupFeeDueAt" TIMESTAMP(3),
+    "setupFeePaid" BOOLEAN NOT NULL DEFAULT false,
+    "setupFeePaidAt" TIMESTAMP(3),
+    "setupFeePaymentId" TEXT,
+    "customOneTimeFeeEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "customOneTimeFeeAmount" DECIMAL(14,2),
+    "customOneTimeFeeWaived" BOOLEAN NOT NULL DEFAULT false,
+    "customSubscriptionEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "customSubscriptionPlanId" TEXT,
+    "customSubscriptionAmount" DECIMAL(14,2),
+    "customSubscriptionWaived" BOOLEAN NOT NULL DEFAULT false,
+    "billingPolicySetByDeveloperId" TEXT,
+    "billingPolicySetReason" TEXT,
+    "billingPolicyUpdatedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -112,13 +101,11 @@ CREATE TABLE "Subscription" (
     "currency" TEXT NOT NULL DEFAULT 'INR',
     "status" "SubscriptionStatus" NOT NULL,
     "startDate" TIMESTAMP(3) NOT NULL,
-    "endDate" TIMESTAMP(3),
     "nextBillingAt" TIMESTAMP(3) NOT NULL,
     "previousBillingAt" TIMESTAMP(3),
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "mandateStatus" "MandateStatus" NOT NULL DEFAULT 'PENDING',
     "mandateUpdatedAt" TIMESTAMP(3),
-    "authAttempts" INTEGER NOT NULL DEFAULT 0,
     "retryCount" INTEGER NOT NULL DEFAULT 0,
     "maxRetries" INTEGER NOT NULL DEFAULT 3,
     "isInGrace" BOOLEAN NOT NULL DEFAULT false,
@@ -149,21 +136,68 @@ CREATE TABLE "SubscriptionTransaction" (
 );
 
 -- CreateTable
-CREATE TABLE "Member" (
+CREATE TABLE "SubscriptionStateTransition" (
+    "id" TEXT NOT NULL,
+    "subscriptionId" TEXT NOT NULL,
+    "fromStatus" "SubscriptionStatus" NOT NULL,
+    "toStatus" "SubscriptionStatus" NOT NULL,
+    "reason" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SubscriptionStateTransition_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "email" TEXT,
+    "email" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
-    "role" TEXT NOT NULL,
-    "societyId" TEXT NOT NULL,
-    "isDeleted" BOOLEAN NOT NULL DEFAULT false,
-    "deletedAt" TIMESTAMP(3),
-    "createdBy" TEXT,
-    "updatedBy" TEXT,
+    "avatar" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Member_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Membership" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "societyId" TEXT NOT NULL,
+    "roleId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "deletedAt" TIMESTAMP(3),
+    "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Membership_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SocietyRole" (
+    "id" TEXT NOT NULL,
+    "societyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "isSystem" BOOLEAN NOT NULL DEFAULT false,
+    "permissions" TEXT[],
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SocietyRole_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RefreshToken" (
+    "id" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "isRevoked" BOOLEAN NOT NULL DEFAULT false,
+    "deviceId" TEXT,
+    "userAgent" TEXT,
+    "ipAddress" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "userId" TEXT NOT NULL,
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -177,7 +211,7 @@ CREATE TABLE "Customer" (
     "pan" TEXT,
     "accountType" "CustomerAccountType" NOT NULL,
     "societyId" TEXT NOT NULL,
-    "memberId" TEXT NOT NULL,
+    "membershipId" TEXT NOT NULL,
     "isDeleted" BOOLEAN NOT NULL DEFAULT false,
     "deletedAt" TIMESTAMP(3),
     "createdBy" TEXT NOT NULL,
@@ -452,7 +486,13 @@ CREATE INDEX "Society_status_idx" ON "Society"("status");
 CREATE UNIQUE INDEX "SocietyPlanSettings_societyId_key" ON "SocietyPlanSettings"("societyId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "SocietyPlanSettings_setupFeePaymentId_key" ON "SocietyPlanSettings"("setupFeePaymentId");
+
+-- CreateIndex
 CREATE INDEX "SocietyPlanSettings_societyId_idx" ON "SocietyPlanSettings"("societyId");
+
+-- CreateIndex
+CREATE INDEX "SocietyPlanSettings_setupFeePaid_idx" ON "SocietyPlanSettings"("setupFeePaid");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Subscription_razorpaySubId_key" ON "Subscription"("razorpaySubId");
@@ -479,19 +519,49 @@ CREATE INDEX "SubscriptionTransaction_razorpayPaymentId_idx" ON "SubscriptionTra
 CREATE INDEX "SubscriptionTransaction_status_idx" ON "SubscriptionTransaction"("status");
 
 -- CreateIndex
-CREATE INDEX "Member_societyId_idx" ON "Member"("societyId");
+CREATE INDEX "SubscriptionStateTransition_subscriptionId_idx" ON "SubscriptionStateTransition"("subscriptionId");
 
 -- CreateIndex
-CREATE INDEX "Member_phone_idx" ON "Member"("phone");
+CREATE INDEX "SubscriptionStateTransition_createdAt_idx" ON "SubscriptionStateTransition"("createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Member_societyId_phone_key" ON "Member"("societyId", "phone");
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_phone_key" ON "User"("phone");
+
+-- CreateIndex
+CREATE INDEX "User_phone_idx" ON "User"("phone");
+
+-- CreateIndex
+CREATE INDEX "User_email_idx" ON "User"("email");
+
+-- CreateIndex
+CREATE INDEX "Membership_userId_idx" ON "Membership"("userId");
+
+-- CreateIndex
+CREATE INDEX "Membership_societyId_idx" ON "Membership"("societyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Membership_userId_societyId_key" ON "Membership"("userId", "societyId");
+
+-- CreateIndex
+CREATE INDEX "SocietyRole_societyId_idx" ON "SocietyRole"("societyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SocietyRole_societyId_name_key" ON "SocietyRole"("societyId", "name");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_expiresAt_idx" ON "RefreshToken"("expiresAt");
 
 -- CreateIndex
 CREATE INDEX "Customer_societyId_idx" ON "Customer"("societyId");
 
 -- CreateIndex
-CREATE INDEX "Customer_memberId_idx" ON "Customer"("memberId");
+CREATE INDEX "Customer_membershipId_idx" ON "Customer"("membershipId");
 
 -- CreateIndex
 CREATE INDEX "Customer_phone_idx" ON "Customer"("phone");
@@ -569,13 +639,28 @@ ALTER TABLE "Subscription" ADD CONSTRAINT "Subscription_societyId_fkey" FOREIGN 
 ALTER TABLE "SubscriptionTransaction" ADD CONSTRAINT "SubscriptionTransaction_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Member" ADD CONSTRAINT "Member_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "SubscriptionStateTransition" ADD CONSTRAINT "SubscriptionStateTransition_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "SocietyRole"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SocietyRole" ADD CONSTRAINT "SocietyRole_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_membershipId_fkey" FOREIGN KEY ("membershipId") REFERENCES "Membership"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Nominee" ADD CONSTRAINT "Nominee_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

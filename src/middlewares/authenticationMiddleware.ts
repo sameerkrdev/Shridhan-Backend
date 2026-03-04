@@ -2,17 +2,25 @@ import prisma from "@/config/prisma.js";
 import { constants } from "@/constants.js";
 import { verifyAccessToken } from "@/services/authTokenService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
-import type { Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import createHttpError from "http-errors";
+import { z } from "zod";
+
+const societyQuerySchema = z
+  .object({
+    societyId: z.uuid().optional(),
+  })
+  .passthrough();
 
 export const authenticaionMiddleware = () => {
-  return async (req: IAuthorizedRequest, _: Response, next: NextFunction) => {
+  return async (req: Request, _: Response, next: NextFunction) => {
     try {
       const headerToken = req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.split(" ")[1]
         : undefined;
 
-      const token = req.cookies[constants.ACCESS_COOKIE_NAME] ?? headerToken;
+      const token =
+        (req as IAuthorizedRequest).cookies?.[constants.ACCESS_COOKIE_NAME] ?? headerToken;
 
       if (!token) {
         throw createHttpError(401, "Access token missing");
@@ -24,17 +32,15 @@ export const authenticaionMiddleware = () => {
         throw createHttpError(401, "Invalid or expired token");
       }
 
-      // 1) User must exist
-      const member = await prisma.member.findUnique({
+      const user = await prisma.user.findUnique({
         where: { id: tokenData.sub },
       });
-      if (!member) throw createHttpError(401, "Invalid user");
+      if (!user) throw createHttpError(401, "Invalid user");
 
-      // 2) Ensure device/session exists and is not revoked
       const session = await prisma.refreshToken.findFirst({
         where: {
           id: tokenData.tokenId,
-          memberId: tokenData.sub,
+          userId: tokenData.sub,
           isRevoked: false,
           expiresAt: { gt: new Date() },
         },
@@ -44,9 +50,31 @@ export const authenticaionMiddleware = () => {
         throw createHttpError(401, "Session revoked. Please login again.");
       }
 
-      // 3) Attach data
-      req.member = member;
-      req.session = session.id; // ← useful for logout device
+      const authorizedReq = req as unknown as IAuthorizedRequest;
+      authorizedReq.user = user;
+      authorizedReq.session = session.id;
+
+      const validatedQuery = societyQuerySchema.safeParse(req.query);
+      if (!validatedQuery.success) {
+        throw createHttpError(400, "Invalid query parameters");
+      }
+
+      const societyId =
+        (req.headers["x-society-id"] as string | undefined) ?? validatedQuery.data.societyId;
+
+      if (societyId) {
+        const membership = await prisma.membership.findFirst({
+          where: {
+            userId: user.id,
+            societyId,
+            deletedAt: null,
+          },
+        });
+
+        if (membership) {
+          authorizedReq.membership = membership;
+        }
+      }
 
       next();
     } catch (error) {

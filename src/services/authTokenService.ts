@@ -4,29 +4,29 @@ import createHttpError from "http-errors";
 import env from "@/config/dotenv.js";
 import type { IAccessTokenPayload, IDeviceInfo, IRefreshTokenPayload } from "@/types/authType.js";
 import { constants } from "@/constants.js";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 
 interface TokenPair {
   accessToken: string;
   refreshToken: string;
 }
 
-// ================== Load Keys (multiline fix) ==================
 const PRIVATE_KEY = env.JWT_PRIVATE_KEY.replace(/\\n/g, "\n");
 const PUBLIC_KEY = env.JWT_PUBLIC_KEY.replace(/\\n/g, "\n");
+const PRIVATE_KEY_OBJECT = createPrivateKey(PRIVATE_KEY);
+const PUBLIC_KEY_OBJECT = createPublicKey(PUBLIC_KEY);
 
-// ================== Generate Token Pair ==================
 export const generateTokenPair = async (
-  memberId: string,
+  userId: string,
   deviceInfo?: IDeviceInfo,
 ): Promise<TokenPair> => {
   const expiresAt = new Date(
     Date.now() + constants.REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000,
   );
 
-  // 1) Create DB session entry
   const session = await prisma.refreshToken.create({
     data: {
-      memberId,
+      userId,
       deviceId: deviceInfo?.deviceId ?? null,
       userAgent: deviceInfo?.userAgent ?? null,
       ipAddress: deviceInfo?.ipAddress ?? null,
@@ -35,59 +35,52 @@ export const generateTokenPair = async (
     },
   });
 
-  // 2) Sign refresh JWT
   const refreshToken = jwt.sign(
     {
-      sub: memberId,
+      sub: userId,
       tokenId: session.id,
       type: "refresh",
     } satisfies IRefreshTokenPayload,
-    PRIVATE_KEY,
+    PRIVATE_KEY_OBJECT,
     {
       algorithm: "RS256",
       expiresIn: `${constants.REFRESH_TOKEN_EXPIRY_DAYS}d`,
     },
   );
 
-  // 3) sign access token
   const accessToken = jwt.sign(
-    { sub: memberId, type: "access", tokenId: session.id } satisfies IAccessTokenPayload,
-    PRIVATE_KEY,
+    { sub: userId, type: "access", tokenId: session.id } satisfies IAccessTokenPayload,
+    PRIVATE_KEY_OBJECT,
     {
       algorithm: "RS256",
       expiresIn: `${constants.ACCESS_TOKEN_EXPIRY_SECONDS}s`,
     },
   );
 
-  return {
-    accessToken,
-    refreshToken,
-  };
+  return { accessToken, refreshToken };
 };
 
-// ================== Verify Access Token ==================
 export const verifyAccessToken = (token: string): IAccessTokenPayload | null => {
   try {
-    const decoded = jwt.verify(token, PUBLIC_KEY) as IAccessTokenPayload;
+    const decoded = jwt.verify(token, PUBLIC_KEY_OBJECT) as IAccessTokenPayload;
     return decoded.type === "access" ? decoded : null;
   } catch {
     return null;
   }
 };
 
-// ================== Verify Refresh Token ==================
 export const verifyRefreshToken = async (token: string): Promise<IRefreshTokenPayload | null> => {
   try {
-    const decoded = jwt.verify(token, PUBLIC_KEY) as IRefreshTokenPayload;
+    const decoded = jwt.verify(token, PUBLIC_KEY_OBJECT) as IRefreshTokenPayload;
     if (decoded.type !== "refresh") return null;
 
     const stored = await prisma.refreshToken.findUnique({
       where: { id: decoded.tokenId },
+      select: { userId: true },
     });
 
     if (!stored) return null;
-    if (stored.isRevoked) return null;
-    if (stored.expiresAt < new Date()) return null;
+    if (stored.userId !== decoded.sub) return null;
 
     return decoded;
   } catch {
@@ -95,26 +88,39 @@ export const verifyRefreshToken = async (token: string): Promise<IRefreshTokenPa
   }
 };
 
-// ================== Token Rotation ==================
+const verifyRefreshTokenSignatureOnly = (token: string): IRefreshTokenPayload | null => {
+  try {
+    const decoded = jwt.verify(token, PUBLIC_KEY_OBJECT) as IRefreshTokenPayload;
+    return decoded.type === "refresh" ? decoded : null;
+  } catch {
+    return null;
+  }
+};
+
 export const refreshTokens = async (
   refreshToken: string,
   deviceInfo?: IDeviceInfo,
 ): Promise<TokenPair> => {
-  const decoded = await verifyRefreshToken(refreshToken);
-
+  const decoded = verifyRefreshTokenSignatureOnly(refreshToken);
   if (!decoded) throw createHttpError(401, "Invalid or expired refresh token");
 
-  // revoke existing session
-  await prisma.refreshToken.update({
-    where: { id: decoded.tokenId },
+  const revokeResult = await prisma.refreshToken.updateMany({
+    where: {
+      id: decoded.tokenId,
+      userId: decoded.sub,
+      isRevoked: false,
+      expiresAt: { gt: new Date() },
+    },
     data: { isRevoked: true },
   });
 
-  // issue new token pair
+  if (revokeResult.count !== 1) {
+    throw createHttpError(401, "Invalid or expired refresh token");
+  }
+
   return generateTokenPair(decoded.sub, deviceInfo);
 };
 
-// ================== Revocation Utilities ==================
 export const revokeRefreshToken = async (refreshToken: string): Promise<void> => {
   const decoded = await verifyRefreshToken(refreshToken);
   if (!decoded) return;
@@ -125,15 +131,15 @@ export const revokeRefreshToken = async (refreshToken: string): Promise<void> =>
   });
 };
 
-export const revokeAllRefreshTokens = async (memberId: string): Promise<void> => {
+export const revokeAllRefreshTokens = async (userId: string): Promise<void> => {
   await prisma.refreshToken.updateMany({
-    where: { memberId },
+    where: { userId },
     data: { isRevoked: true },
   });
 };
 
 export const revokeOtherRefreshTokens = async (
-  memberId: string,
+  userId: string,
   currentRefreshToken: string,
 ): Promise<void> => {
   const decoded = await verifyRefreshToken(currentRefreshToken);
@@ -141,7 +147,7 @@ export const revokeOtherRefreshTokens = async (
 
   await prisma.refreshToken.updateMany({
     where: {
-      memberId,
+      userId,
       id: { not: decoded.tokenId },
     },
     data: { isRevoked: true },
@@ -150,10 +156,7 @@ export const revokeOtherRefreshTokens = async (
 
 export const cleanupExpiredTokens = async (): Promise<number> => {
   const { count } = await prisma.refreshToken.deleteMany({
-    where: {
-      expiresAt: { lt: new Date() },
-    },
+    where: { expiresAt: { lt: new Date() } },
   });
-
   return count;
 };

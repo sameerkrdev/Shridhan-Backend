@@ -29,7 +29,26 @@ const zodValidatorMiddleware = <T extends z.ZodTypeAny>(schema: T) => {
     };
 
     if (body !== undefined) req.body = body;
-    if (query !== undefined) req.query = query as any;
+    if (query !== undefined) {
+      try {
+        req.query = query as any;
+      } catch {
+        // Express 5 can expose req.query as getter-only in some setups.
+        // Fall back to mutating the existing query object.
+        if (
+          typeof req.query === "object" &&
+          req.query !== null &&
+          typeof query === "object" &&
+          query !== null
+        ) {
+          const currentQuery = req.query as Record<string, unknown>;
+          Object.keys(currentQuery).forEach((key) => {
+            delete currentQuery[key];
+          });
+          Object.assign(currentQuery, query as Record<string, unknown>);
+        }
+      }
+    }
     if (params !== undefined) req.params = params as any;
 
     return next();

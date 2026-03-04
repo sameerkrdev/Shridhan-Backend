@@ -17,7 +17,7 @@ import {
   verifyEmailOtpValidationSchema,
 } from "@/zodValidationSchema/otpValidationSchema.js";
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 router.post("/send", zodValidatorMiddleware(otpSendValidationSchema), sendOtp);
 router.post("/verify", zodValidatorMiddleware(verifyOtpValidationSchema), verifyOtp);

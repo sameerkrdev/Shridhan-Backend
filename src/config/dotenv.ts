@@ -14,12 +14,17 @@ const env = cleanEnv(process.env, {
   PORT: port({ default: 3000 }),
   NODE_ENV: str({ choices: ["development", "test", "production"], default: "development" }),
   DATABASE_URL: str(),
-  PERMIT_API_KEY: str(),
+  RAZORPAY_KEY_ID: str(),
+  RAZORPAY_KEY_SECRET: str(),
+  RAZORPAY_PLAN_ID: str(),
+  RAZORPAY_WEBHOOK_SECRET: str(),
+  RAZORPAY_WEBHOOK_OLD_SECRETS: str({ default: "" }),
+  INTERNAL_DEVELOPER_API_KEY: str({ default: "" }),
 
   JWT_PUBLIC_KEY: str(),
   JWT_PRIVATE_KEY: str(),
 
-  COOKIE_DOMAIN: str({ default: ".myapp.com" }),
+  COOKIE_DOMAIN: str({ default: ".shridhan.in" }),
 
   REDIS_URI: str(),
 
@@ -31,6 +36,12 @@ const env = cleanEnv(process.env, {
 
   WHATSAPP_ACCESS_TOKEN: str(),
   WHATSAPP_PHONE_NUMBER_ID: str(),
+
+  R2_ACCOUNT_ID: str(),
+  R2_ACCESS_KEY_ID: str(),
+  R2_SECRET_ACCESS_KEY: str(),
+  R2_BUCKET_NAME: str(),
+  R2_PUBLIC_BASE_URL: str(),
 });
 
 export default env;

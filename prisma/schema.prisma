@@ -11,25 +11,20 @@ enum SubscriptionStatus {
   ACTIVE
   PAUSED
   CANCELLED
-  EXPIRED
   PAYMENT_FAILED
   PENDING_ACTIVATION
 }
 
 enum MandateStatus {
   ACTIVE
-  EXPIRED
   PENDING
   FAILED
-  NOT_REQUIRED
 }
 
 enum SubscriptionTransactionStatus {
   SUCCESS
   FAILED
   PENDING
-  PROCESSING
-  NOT_INITIATED
   REFUNDED
 }
 
@@ -67,12 +62,8 @@ enum ServiceType {
 
 enum SocietyStatus {
   CREATED
-  TRIAL
+  RAZORPAY_PENDING
   ACTIVE
-  GRACE
-  EXPIRED
-  SUSPENDED
-  BLOCKED
 }
 
 enum PaymentMethod {
@@ -109,7 +100,8 @@ model Society {
   planSettings SocietyPlanSettings?
 
   customers                         Customer[]
-  members                           Member[]
+  memberships                       Membership[]
+  roles                             SocietyRole[]
   subscriptions                     Subscription[]
   recurringDepositProjectType       RecurringDepositProjectType[]
   monthlyInterestSchemeProjectTypes MonthlyInterestSchemeProjectType[]
@@ -134,20 +126,31 @@ model SocietyPlanSettings {
   societyId String  @unique
   society   Society @relation(fields: [societyId], references: [id])
 
-  // e.g. max customers allowed for plan, trial info, plan reference to billing system
-  planId       String? // external plan id (Razorpay)
-  planName     String?
-  planAmount   Decimal?  @db.Decimal(14, 2)
-  currency     String?   @default("INR")
-  maxCustomers Int? // limit imposed by plan
-  isTrialUsed  Boolean   @default(false)
-  trialEndDate DateTime?
-  graceUntil   DateTime?
+  trialStartDate           DateTime?
+  trialEndDate             DateTime?
+  developerOverrideEnabled Boolean   @default(false)
+
+  setupFeeEnabled        Boolean   @default(true)
+  setupFeeAmount         Decimal   @default(50000) @db.Decimal(14, 2)
+  setupFeePaid           Boolean   @default(false)
+  setupFeePaidAt         DateTime?
+  setupFeePaymentId      String?   @unique
+
+  customOneTimeFeeEnabled       Boolean   @default(false)
+  customOneTimeFeeAmount        Decimal?  @db.Decimal(14, 2)
+  customOneTimeFeeWaived        Boolean   @default(false)
+  customSubscriptionEnabled     Boolean   @default(false)
+  customSubscriptionAmount      Decimal?  @db.Decimal(14, 2)
+  customSubscriptionWaived      Boolean   @default(false)
+  billingPolicySetByDeveloperId String?
+  billingPolicySetReason        String?
+  billingPolicyUpdatedAt        DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([societyId])
+  @@index([setupFeePaid])
 }
 
 model Subscription {
@@ -163,11 +166,12 @@ model Subscription {
   planAmount    Decimal @db.Decimal(14, 2)
   billingPeriod Int // e.g., 30 days or month count
   currency      String  @default("INR")
+  oneTimeAddonApplied Boolean @default(false)
+  oneTimeAddonAmount  Decimal? @db.Decimal(14, 2)
 
   // Subscription lifecycle
   status            SubscriptionStatus
   startDate         DateTime
-  endDate           DateTime?
   nextBillingAt     DateTime
   previousBillingAt DateTime?
 
@@ -179,9 +183,7 @@ model Subscription {
   mandateUpdatedAt DateTime?
 
   // Payment retry / failures
-  authAttempts Int @default(0)
-  retryCount   Int @default(0)
-  maxRetries   Int @default(3)
+  retryCount Int @default(0)
 
   // Grace period (when auto-debit fails)
   isInGrace    Boolean   @default(false)
@@ -190,7 +192,8 @@ model Subscription {
   societyId String
   society   Society @relation(fields: [societyId], references: [id])
 
-  transactions SubscriptionTransaction[]
+  transactions   SubscriptionTransaction[]
+  transitionLogs SubscriptionStateTransition[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -204,12 +207,14 @@ model SubscriptionTransaction {
   id String @id @default(uuid())
 
   amount Decimal                       @db.Decimal(14, 2)
-  status SubscriptionTransactionStatus @default(NOT_INITIATED)
+  status SubscriptionTransactionStatus @default(PENDING)
   isPaid Boolean                       @default(false)
 
   razorpayPaymentId String?   @unique
+  razorpayRefundId  String?   @unique
   billingDate       DateTime
   paymentDate       DateTime?
+  refundDate        DateTime?
 
   paymentMethod     PaymentMethod?
   paymentCycleCount Int // cycle count at the time of billing
@@ -225,41 +230,79 @@ model SubscriptionTransaction {
   @@index([status])
 }
 
-model Member {
-  id    String  @id @default(uuid())
-  name  String
-  email String?
-  phone String
-  role  String
+model SubscriptionStateTransition {
+  id String @id @default(uuid())
 
-  societyId String?
-  society   Society? @relation(fields: [societyId], references: [id])
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
 
+  fromStatus SubscriptionStatus
+  toStatus   SubscriptionStatus
+  reason     String
+
+  createdAt DateTime @default(now())
+
+  @@index([subscriptionId])
+  @@index([createdAt])
+}
+
+model User {
+  id            String  @id @default(cuid())
+  name          String
+  email         String  @unique
+  phone         String  @unique
+  avatar        String?
+
+  memberships   Membership[]
   refreshTokens RefreshToken[]
-  customers     Customer[]
-
-  // soft delete + audit
-  isDeleted Boolean   @default(false)
-  deletedAt DateTime?
-
-  createdBy String?
-  updatedBy String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([societyId, phone])
-  @@index([societyId])
   @@index([phone])
+  @@index([email])
 }
 
-// Add to your schema
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  societyId String
+  society   Society  @relation(fields: [societyId], references: [id])
+  roleId    String
+  role      SocietyRole @relation(fields: [roleId], references: [id])
+  status    String   @default("active")
+
+  customers Customer[]
+
+  deletedAt DateTime?
+  joinedAt  DateTime  @default(now())
+
+  @@unique([userId, societyId])
+  @@index([userId])
+  @@index([societyId])
+}
+
+model SocietyRole {
+  id          String   @id @default(cuid())
+  societyId   String
+  name        String
+  isSystem    Boolean  @default(false)
+  permissions String[]
+  createdAt   DateTime @default(now())
+
+  society      Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  memberships  Membership[]
+
+  @@unique([societyId, name])
+  @@index([societyId])
+}
+
 model RefreshToken {
   id        String   @id @default(uuid())
   expiresAt DateTime
   isRevoked Boolean  @default(false)
 
-  // Track device/session info
   deviceId  String?
   userAgent String?
   ipAddress String?
@@ -267,10 +310,10 @@ model RefreshToken {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberId String
-  member   Member @relation(fields: [memberId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  @@index([memberId])
+  @@index([userId])
   @@index([expiresAt])
 }
 
@@ -291,8 +334,8 @@ model Customer {
   societyId String
   society   Society @relation(fields: [societyId], references: [id])
 
-  memberId String
-  member   Member @relation(fields: [memberId], references: [id])
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id])
 
   nominees          Nominee[]
   loans             Loan[]
@@ -311,7 +354,7 @@ model Customer {
   updatedAt DateTime @updatedAt
 
   @@index([societyId])
-  @@index([memberId])
+  @@index([membershipId])
   @@index([phone])
 }
 
@@ -376,6 +419,7 @@ model FixedDepositProjectType {
 model FixDeposit {
   id String @id @default(uuid())
 
+  principalAmount Decimal  @db.Decimal(14, 2)
   startDate      DateTime
   maturityAmount Decimal  @db.Decimal(14, 2)
   maturityDate   DateTime
@@ -388,6 +432,7 @@ model FixDeposit {
   customer      Customer                @relation(fields: [customerId], references: [id])
 
   transactions FixDepositTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -401,6 +446,7 @@ model FixDeposit {
 
   @@index([projectTypeId])
   @@index([customerId])
+  @@index([maturityDate])
 }
 
 model FixDepositTransaction {
@@ -431,6 +477,51 @@ model FixDepositTransaction {
 
   @@index([fixDepositId])
   @@index([transactionId])
+  @@index([createdAt])
+}
+
+model ServiceDocument {
+  id String @id @default(uuid())
+
+  serviceType     ServiceType
+  serviceEntityId String
+
+  fileName    String
+  displayName String
+  objectKey   String @unique
+  fileUrl     String
+  contentType String?
+  sizeBytes   Int?
+  isUploaded  Boolean @default(false)
+
+  fixDepositId String?
+  fixDeposit   FixDeposit? @relation(fields: [fixDepositId], references: [id])
+
+  recurringDepositId String?
+  recurringDeposit   RecurringDeposit? @relation(fields: [recurringDepositId], references: [id])
+
+  monthlyInterestSchemeId String?
+  monthlyInterestScheme   MonthlyInterestScheme? @relation(fields: [monthlyInterestSchemeId], references: [id])
+
+  loanId String?
+  loan   Loan? @relation(fields: [loanId], references: [id])
+
+  // soft delete + audit
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdBy String
+  updatedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fixDepositId])
+  @@index([isUploaded])
+  @@index([serviceType, serviceEntityId])
+  @@index([recurringDepositId])
+  @@index([monthlyInterestSchemeId])
+  @@index([loanId])
 }
 
 model MonthlyInterestSchemeProjectType {
@@ -478,6 +569,7 @@ model MonthlyInterestScheme {
   customer      Customer                         @relation(fields: [customerId], references: [id])
 
   transactions MonthlyInterestSchemeTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -576,6 +668,7 @@ model RecurringDeposit {
   customer   Customer @relation(fields: [customerId], references: [id])
 
   transactions RecurringDepositTransaction[]
+  documents    ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)
@@ -629,7 +722,8 @@ model Loan {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
-  emi LoanEmi[]
+  emi       LoanEmi[]
+  documents ServiceDocument[]
 
   // soft delete + audit
   isDeleted Boolean   @default(false)

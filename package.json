@@ -24,6 +24,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
@@ -44,8 +46,12 @@
     "typescript-eslint": "^8.48.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1001.0",
+    "@aws-sdk/s3-request-presigner": "^3.1001.0",
     "@prisma/client": "^7.0.1",
     "@prisma/extension-accelerate": "^3.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "envalid": "^8.1.1",
     "express": "^5.1.0",
@@ -53,9 +59,11 @@
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.11",
     "nodemon": "^3.1.11",
     "permitio": "^2.7.5",
+    "razorpay": "^2.9.6",
     "winston": "^3.18.3",
     "zod": "^4.1.13"
   },
