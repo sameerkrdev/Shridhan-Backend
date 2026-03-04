@@ -1,10 +1,17 @@
 import createHttpError from "http-errors";
-import { Prisma, MandateStatus, SubscriptionStatus } from "@/generated/prisma/client.js";
+import {
+  Prisma,
+  MandateStatus,
+  SubscriptionStatus,
+  SubscriptionTransactionStatus,
+} from "@/generated/prisma/client.js";
 import prisma from "@/config/prisma.js";
 import env from "@/config/dotenv.js";
 import razorpayClient from "@/config/razorpay.js";
+import logger from "@/config/logger.js";
 
-const BILLING_PERIOD_DAYS = 30;
+const TRIAL_PERIOD_DAYS = 60;
+const SUBSCRIPTION_BILLING_PERIOD_DAYS = 30;
 const GRACE_PERIOD_DAYS = 30;
 const BILLING_PROVIDER = "razorpay";
 const DEFAULT_SETUP_FEE_AMOUNT = new Prisma.Decimal(50000);
@@ -29,6 +36,25 @@ const addDays = (value: Date, days: number) => {
 
 const toEpochSeconds = (value: Date) => Math.floor(value.getTime() / 1000);
 const toPaise = (amount: Prisma.Decimal) => Number(amount.mul(100).toFixed(0));
+const RAZORPAY_API_TIMEOUT_MS = 20_000;
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string) => {
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(createHttpError(504, timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 const resolveEffectiveSetupFeeAmount = (settings: {
   customOneTimeFeeEnabled: boolean;
@@ -46,20 +72,18 @@ export const initializeSocietyTrial = async (
   societyId: string,
   startedAt: Date = new Date(),
 ) => {
-  const trialEndDate = addDays(startedAt, BILLING_PERIOD_DAYS);
+  const trialEndDate = addDays(startedAt, TRIAL_PERIOD_DAYS);
 
   return tx.societyPlanSettings.upsert({
     where: { societyId },
     update: {
-      isTrialUsed: true,
+      trialStartDate: startedAt,
       trialEndDate,
-      setupFeeDueAt: trialEndDate,
     },
     create: {
       societyId,
-      isTrialUsed: true,
+      trialStartDate: startedAt,
       trialEndDate,
-      setupFeeDueAt: trialEndDate,
       setupFeeAmount: DEFAULT_SETUP_FEE_AMOUNT,
     },
   });
@@ -88,7 +112,6 @@ type BillingAccessState =
   | "DEVELOPER_OVERRIDE"
   | "SUBSCRIPTION_WAIVED"
   | "TRIAL_ACTIVE"
-  | "SETUP_FEE_PENDING"
   | "SUBSCRIPTION_ACTIVE"
   | "GRACE_ACTIVE"
   | "TRIAL_EXPIRED"
@@ -97,7 +120,6 @@ type BillingAccessState =
   | "SUBSCRIPTION_CANCELLED"
   | "SUBSCRIPTION_INACTIVE"
   | "SUBSCRIPTION_PAYMENT_FAILED"
-  | "SUBSCRIPTION_EXPIRED"
   | "SUBSCRIPTION_PENDING_ACTIVATION"
   | "SUBSCRIPTION_REQUIRED";
 
@@ -120,15 +142,6 @@ export const evaluateSocietyBillingAccess = async (
 
   if (settings?.trialEndDate && settings.trialEndDate.getTime() >= now.getTime()) {
     return { isAllowed: true, state: "TRIAL_ACTIVE" };
-  }
-
-  if (
-    settings &&
-    settings.setupFeeEnabled &&
-    !settings.customOneTimeFeeWaived &&
-    !settings.setupFeePaid
-  ) {
-    return { isAllowed: false, state: "SETUP_FEE_PENDING" };
   }
 
   if (settings?.customSubscriptionWaived) {
@@ -197,10 +210,6 @@ export const evaluateSocietyBillingAccess = async (
     return { isAllowed: false, state: "SUBSCRIPTION_CANCELLED" };
   }
 
-  if (subscription.status === SubscriptionStatus.EXPIRED) {
-    return { isAllowed: false, state: "SUBSCRIPTION_EXPIRED" };
-  }
-
   if (subscription.status === SubscriptionStatus.PAYMENT_FAILED) {
     return { isAllowed: false, state: "SUBSCRIPTION_PAYMENT_FAILED" };
   }
@@ -213,6 +222,12 @@ export const evaluateSocietyBillingAccess = async (
 };
 
 export const setupSubscriptionMandate = async (userId: string, societyId: string) => {
+  logger.info({
+    message: "Setup subscription mandate initiated",
+    userId,
+    societyId,
+  });
+
   const membership = await prisma.membership.findFirst({
     where: { userId, societyId, deletedAt: null },
     include: { society: true, user: true },
@@ -224,24 +239,19 @@ export const setupSubscriptionMandate = async (userId: string, societyId: string
 
   const { user: memberUser } = membership;
 
-  const planSettings = await prisma.societyPlanSettings.findUnique({
+  const planSettings = await prisma.societyPlanSettings.upsert({
     where: { societyId },
+    update: {},
+    create: { societyId },
   });
 
-  if (!planSettings?.planId) {
+  if (!env.RAZORPAY_PLAN_ID) {
     throw createHttpError(
       400,
-      "Razorpay planId is not configured for this society. Contact developer support.",
+      "Razorpay planId is not configured in environment. Contact developer support.",
     );
   }
-
-  if (
-    planSettings.setupFeeEnabled &&
-    !planSettings.customOneTimeFeeWaived &&
-    !planSettings.setupFeePaid
-  ) {
-    throw createHttpError(403, "Setup fee payment is required before subscription setup");
-  }
+  const razorpayPlanId = String(env.RAZORPAY_PLAN_ID);
 
   const existingPending = await prisma.subscription.findFirst({
     where: {
@@ -252,60 +262,137 @@ export const setupSubscriptionMandate = async (userId: string, societyId: string
   });
 
   if (existingPending) {
+    let razorpaySubscriptionShortUrl: string | null = null;
+    try {
+      const existingSubscription = await withTimeout(
+        razorpayClient.subscriptions.fetch(existingPending.razorpaySubId),
+        RAZORPAY_API_TIMEOUT_MS,
+        "Razorpay subscription fetch timed out",
+      );
+      const shortUrl = (existingSubscription as { short_url?: string | null }).short_url;
+      razorpaySubscriptionShortUrl = shortUrl ?? null;
+    } catch (error) {
+      logger.warn({
+        message: "Failed to fetch Razorpay short url for existing pending subscription",
+        societyId,
+        subscriptionId: existingPending.id,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+
     return {
       keyId: env.RAZORPAY_KEY_ID,
       razorpaySubscriptionId: existingPending.razorpaySubId,
       razorpayCustomerId: existingPending.customerId,
       status: existingPending.status,
+      razorpaySubscriptionShortUrl,
     };
   }
 
-  const customer = await razorpayClient.customers.create({
-    name: memberUser.name,
-    contact: memberUser.phone,
-    ...(memberUser.email ? { email: memberUser.email } : {}),
-    notes: {
+  let customerId = `pending_${membership.id}`;
+  try {
+    logger.info({
+      message: "Creating Razorpay customer for subscription mandate",
       societyId,
       membershipId: membership.id,
-    },
-  });
-  const customerId = (customer as { id: string }).id;
-
-  const startAt = planSettings.trialEndDate ?? addDays(new Date(), BILLING_PERIOD_DAYS);
-  const subscriptionRequest = await razorpayClient.subscriptions.create({
-    plan_id: planSettings.planId,
-    customer_notify: 1,
-    quantity: 1,
-    total_count: 120,
-    start_at: toEpochSeconds(startAt),
-    notes: {
+    });
+    const customer = await withTimeout(
+      razorpayClient.customers.create({
+        name: memberUser.name,
+        contact: memberUser.phone,
+        ...(memberUser.email ? { email: memberUser.email } : {}),
+        notes: {
+          societyId,
+          membershipId: membership.id,
+        },
+      }),
+      RAZORPAY_API_TIMEOUT_MS,
+      "Razorpay customer creation timed out",
+    );
+    customerId = (customer as { id: string }).id;
+  } catch (error) {
+    logger.warn({
+      message: "Razorpay customer creation failed; continuing with subscription setup",
       societyId,
       membershipId: membership.id,
-    },
-  });
-  const razorpaySubscriptionId = (subscriptionRequest as { id: string }).id;
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 
   const now = new Date();
-  const nextBillingAt = planSettings.trialEndDate ?? addDays(now, BILLING_PERIOD_DAYS);
+  const startAt =
+    planSettings.trialEndDate && planSettings.trialEndDate.getTime() > now.getTime()
+      ? planSettings.trialEndDate
+      : now;
+  const oneTimeAddonEnabled =
+    planSettings.setupFeeEnabled &&
+    !planSettings.setupFeePaid &&
+    !planSettings.customOneTimeFeeWaived &&
+    !planSettings.developerOverrideEnabled;
+  const oneTimeAddonAmount = resolveEffectiveSetupFeeAmount(planSettings);
+  logger.info({
+    message: "Creating Razorpay subscription for mandate",
+    societyId,
+    customerId,
+  });
+  const subscriptionRequest = await withTimeout(
+    razorpayClient.subscriptions.create({
+      plan_id: razorpayPlanId,
+      customer_notify: 1,
+      quantity: 1,
+      total_count: 120,
+      start_at: toEpochSeconds(startAt),
+      ...(oneTimeAddonEnabled
+        ? {
+            addons: [
+              {
+                item: {
+                  name: "Shridhan one-time onboarding fee",
+                  amount: toPaise(oneTimeAddonAmount),
+                  currency: "INR",
+                },
+              },
+            ],
+          }
+        : {}),
+      notes: {
+        societyId,
+        membershipId: membership.id,
+        oneTimeAddonApplied: oneTimeAddonEnabled ? "true" : "false",
+        oneTimeAddonAmount: oneTimeAddonEnabled ? oneTimeAddonAmount.toFixed(2) : "0.00",
+      },
+    }),
+    RAZORPAY_API_TIMEOUT_MS,
+    "Razorpay subscription creation timed out",
+  );
+  const razorpaySubscriptionId = (subscriptionRequest as { id: string }).id;
+  const resolvedCustomerId = (subscriptionRequest as { customer_id?: string | null }).customer_id;
+  const razorpaySubscriptionShortUrl =
+    (subscriptionRequest as { short_url?: string | null }).short_url ?? null;
+  if (resolvedCustomerId) {
+    customerId = resolvedCustomerId;
+  }
+
+  const nextBillingAt = startAt;
 
   const savedSubscription = await prisma.subscription.create({
     data: {
-      planId: planSettings.planId,
+      planId: razorpayPlanId,
       customerId,
       razorpaySubId: razorpaySubscriptionId,
-      planName: planSettings.planName ?? "Society Subscription",
+      planName: "Society Subscription",
       planAmount:
         (planSettings.customSubscriptionEnabled ? planSettings.customSubscriptionAmount : null) ??
-        planSettings.planAmount ??
         new Prisma.Decimal(0),
-      billingPeriod: BILLING_PERIOD_DAYS,
-      currency: planSettings.currency ?? "INR",
+      billingPeriod: SUBSCRIPTION_BILLING_PERIOD_DAYS,
+      currency: "INR",
+      oneTimeAddonApplied: oneTimeAddonEnabled,
+      oneTimeAddonAmount: oneTimeAddonEnabled ? oneTimeAddonAmount : null,
       status: SubscriptionStatus.PENDING_ACTIVATION,
       startDate: now,
       nextBillingAt,
       isActive: false,
       mandateStatus: MandateStatus.PENDING,
-      maxRetries: 3,
       societyId,
     },
   });
@@ -324,92 +411,7 @@ export const setupSubscriptionMandate = async (userId: string, societyId: string
     razorpaySubscriptionId,
     razorpayCustomerId: customerId,
     status: savedSubscription.status,
-  };
-};
-
-export const createSetupFeePaymentLink = async (userId: string, societyId: string) => {
-  const membership = await prisma.membership.findFirst({
-    where: { userId, societyId, deletedAt: null },
-    include: { society: true, user: true },
-  });
-
-  if (!membership || !membership.society) {
-    throw createHttpError(403, "You are not a member of this society");
-  }
-
-  const { user: memberUser } = membership;
-
-  const planSettings = await prisma.societyPlanSettings.findUnique({
-    where: { societyId },
-  });
-
-  if (!planSettings) {
-    throw createHttpError(404, "Society billing settings not found");
-  }
-
-  if (planSettings.customOneTimeFeeWaived || !planSettings.setupFeeEnabled) {
-    return {
-      setupFeeWaived: true,
-      setupFeePaid: true,
-      paymentLinkUrl: null,
-      amount: "0.00",
-      currency: "INR",
-    };
-  }
-
-  if (planSettings.setupFeePaid) {
-    return {
-      setupFeeWaived: false,
-      setupFeePaid: true,
-      paymentLinkUrl: planSettings.setupFeePaymentLinkUrl,
-      amount: resolveEffectiveSetupFeeAmount(planSettings).toFixed(2),
-      currency: "INR",
-    };
-  }
-
-  const effectiveAmount = resolveEffectiveSetupFeeAmount(planSettings);
-  const amountInPaise = toPaise(effectiveAmount);
-
-  const paymentLinkResponse = await razorpayClient.paymentLink.create({
-    amount: amountInPaise,
-    currency: "INR",
-    accept_partial: false,
-    description: `Shridhan setup fee for ${membership.society.name}`,
-    customer: {
-      name: memberUser.name,
-      contact: memberUser.phone,
-      ...(memberUser.email ? { email: memberUser.email } : {}),
-    },
-    notify: {
-      sms: true,
-      email: Boolean(memberUser.email),
-    },
-    notes: {
-      billingType: "setup_fee",
-      societyId,
-      membershipId: membership.id,
-    },
-  });
-
-  const paymentLinkId = (paymentLinkResponse as unknown as { id: string }).id;
-  const paymentLinkUrl = (paymentLinkResponse as unknown as { short_url?: string }).short_url ?? "";
-
-  await prisma.societyPlanSettings.update({
-    where: { societyId },
-    data: {
-      setupFeeDueAt: planSettings.setupFeeDueAt ?? planSettings.trialEndDate,
-      setupFeePaymentLinkId: paymentLinkId,
-      ...(paymentLinkUrl ? { setupFeePaymentLinkUrl: paymentLinkUrl } : {}),
-    },
-  });
-
-  return {
-    setupFeeWaived: false,
-    setupFeePaid: false,
-    paymentLinkUrl,
-    paymentLinkId,
-    amount: effectiveAmount.toFixed(2),
-    currency: "INR",
+    razorpaySubscriptionShortUrl,
   };
 };
 
@@ -423,7 +425,6 @@ export const updateSocietyBillingPolicy = async (
     customOneTimeFeeAmount?: number;
     customOneTimeFeeWaived?: boolean;
     customSubscriptionEnabled?: boolean;
-    customSubscriptionPlanId?: string;
     customSubscriptionAmount?: number;
     customSubscriptionWaived?: boolean;
     setByDeveloperId: string;
@@ -460,9 +461,6 @@ export const updateSocietyBillingPolicy = async (
       ...(payload.customSubscriptionEnabled !== undefined && {
         customSubscriptionEnabled: payload.customSubscriptionEnabled,
       }),
-      ...(payload.customSubscriptionPlanId !== undefined && {
-        customSubscriptionPlanId: payload.customSubscriptionPlanId,
-      }),
       ...(payload.customSubscriptionAmount !== undefined && {
         customSubscriptionAmount: new Prisma.Decimal(payload.customSubscriptionAmount),
       }),
@@ -476,5 +474,116 @@ export const updateSocietyBillingPolicy = async (
   });
 };
 
+export const cancelSubscriptionAndRefund = async (
+  userId: string,
+  societyId: string,
+  refundLatestPayment = true,
+) => {
+  const membership = await prisma.membership.findFirst({
+    where: { userId, societyId, deletedAt: null },
+    select: { id: true },
+  });
+
+  if (!membership) {
+    throw createHttpError(403, "You are not a member of this society");
+  }
+
+  const subscription = await prisma.subscription.findFirst({
+    where: {
+      societyId,
+      status: { not: SubscriptionStatus.CANCELLED },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  if (!subscription) {
+    throw createHttpError(404, "No active or pending subscription found");
+  }
+
+  const cancelledAt = new Date();
+  await withTimeout(
+    razorpayClient.subscriptions.cancel(subscription.razorpaySubId, 0),
+    RAZORPAY_API_TIMEOUT_MS,
+    "Razorpay subscription cancellation timed out",
+  );
+
+  let refunded = false;
+  let refundId: string | null = null;
+  let refundedPaymentId: string | null = null;
+
+  if (refundLatestPayment) {
+    const latestPaidTransaction = await prisma.subscriptionTransaction.findFirst({
+      where: {
+        subscriptionId: subscription.id,
+        status: SubscriptionTransactionStatus.SUCCESS,
+        razorpayPaymentId: { not: null },
+        razorpayRefundId: null,
+      },
+      orderBy: { paymentDate: "desc" },
+    });
+
+    if (latestPaidTransaction?.razorpayPaymentId) {
+      const refundResponse = (await withTimeout(
+        razorpayClient.payments.refund(latestPaidTransaction.razorpayPaymentId, {
+          notes: {
+            societyId,
+            subscriptionId: subscription.id,
+            reason: "MANUAL_SUBSCRIPTION_CANCELLATION",
+          },
+        }),
+        RAZORPAY_API_TIMEOUT_MS,
+        "Razorpay payment refund timed out",
+      )) as { id: string };
+
+      refundId = refundResponse.id;
+      refundedPaymentId = latestPaidTransaction.razorpayPaymentId;
+      refunded = true;
+
+      await prisma.subscriptionTransaction.update({
+        where: { id: latestPaidTransaction.id },
+        data: {
+          status: "REFUNDED",
+          razorpayRefundId: refundId,
+          refundDate: cancelledAt,
+        },
+      });
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.subscription.findUnique({ where: { id: subscription.id } });
+    if (!current || current.status === SubscriptionStatus.CANCELLED) {
+      return;
+    }
+
+    await tx.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.CANCELLED,
+        isActive: false,
+        mandateStatus: MandateStatus.FAILED,
+        mandateUpdatedAt: cancelledAt,
+        isInGrace: false,
+        graceEndDate: null,
+      },
+    });
+
+    await createSubscriptionTransitionLog(tx, {
+      subscriptionId: subscription.id,
+      fromStatus: current.status,
+      toStatus: SubscriptionStatus.CANCELLED,
+      reason: "MANUAL_CANCELLATION_AND_REFUND",
+    });
+  });
+
+  return {
+    cancelled: true,
+    refunded,
+    refundId,
+    refundedPaymentId,
+  };
+};
+
 export const billingProvider = BILLING_PROVIDER;
 export const billingGraceDays = GRACE_PERIOD_DAYS;
+export const billingTrialDays = TRIAL_PERIOD_DAYS;

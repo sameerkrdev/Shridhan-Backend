@@ -26,9 +26,6 @@ export const patchSocietyBillingPolicy = async (
       ...(req.body.customSubscriptionEnabled !== undefined && {
         customSubscriptionEnabled: req.body.customSubscriptionEnabled,
       }),
-      ...(req.body.customSubscriptionPlanId !== undefined && {
-        customSubscriptionPlanId: req.body.customSubscriptionPlanId,
-      }),
       ...(req.body.customSubscriptionAmount !== undefined && {
         customSubscriptionAmount: req.body.customSubscriptionAmount,
       }),
@@ -38,6 +35,26 @@ export const patchSocietyBillingPolicy = async (
       setByDeveloperId: req.body.setByDeveloperId,
       setReason: req.body.setReason,
     });
+    res.json({ policy: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const approveSocietyBillingOverride = async (
+  req: IUpdateSocietyBillingPolicyRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const updated = await updateSocietyBillingPolicy(req.params.societyId, {
+      developerOverrideEnabled: true,
+      customOneTimeFeeWaived: true,
+      customSubscriptionWaived: true,
+      setByDeveloperId: req.body.setByDeveloperId,
+      setReason: req.body.setReason,
+    });
+
     res.json({ policy: updated });
   } catch (error) {
     next(error);

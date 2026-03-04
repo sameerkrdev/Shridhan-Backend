@@ -12,7 +12,6 @@ export const updateSocietyBillingPolicyValidationSchema = z.object({
     customOneTimeFeeAmount: z.number().positive().optional(),
     customOneTimeFeeWaived: z.boolean().optional(),
     customSubscriptionEnabled: z.boolean().optional(),
-    customSubscriptionPlanId: z.string().min(1).optional(),
     customSubscriptionAmount: z.number().positive().optional(),
     customSubscriptionWaived: z.boolean().optional(),
     setByDeveloperId: z.string().min(1),
@@ -22,4 +21,18 @@ export const updateSocietyBillingPolicyValidationSchema = z.object({
 
 export type UpdateSocietyBillingPolicyValidationSchema = z.infer<
   typeof updateSocietyBillingPolicyValidationSchema
+>;
+
+export const approveSocietyBillingOverrideValidationSchema = z.object({
+  params: z.object({
+    societyId: z.uuid(),
+  }),
+  body: z.object({
+    setByDeveloperId: z.string().min(1),
+    setReason: z.string().min(3),
+  }),
+});
+
+export type ApproveSocietyBillingOverrideValidationSchema = z.infer<
+  typeof approveSocietyBillingOverrideValidationSchema
 >;

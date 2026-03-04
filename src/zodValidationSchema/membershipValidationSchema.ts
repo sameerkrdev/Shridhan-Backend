@@ -14,6 +14,12 @@ export const searchUserValidationSchema = z.object({
   }),
 });
 
+export const listMembersValidationSchema = z.object({
+  query: z.object({
+    includeDeleted: z.enum(["true", "false"]).optional().default("false"),
+  }),
+});
+
 export const addMemberValidationSchema = z.object({
   body: z.object({
     userId: idSchema.optional(),
@@ -58,6 +64,7 @@ export const updateMatrixRolePermissionsValidationSchema = z.object({
 });
 
 export type SearchUserValidationSchema = z.infer<typeof searchUserValidationSchema>;
+export type ListMembersValidationSchema = z.infer<typeof listMembersValidationSchema>;
 export type AddMemberValidationSchema = z.infer<typeof addMemberValidationSchema>;
 export type UpdateRoleValidationSchema = z.infer<typeof updateRoleValidationSchema>;
 export type UpdateStatusValidationSchema = z.infer<typeof updateStatusValidationSchema>;

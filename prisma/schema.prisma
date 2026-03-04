@@ -11,25 +11,20 @@ enum SubscriptionStatus {
   ACTIVE
   PAUSED
   CANCELLED
-  EXPIRED
   PAYMENT_FAILED
   PENDING_ACTIVATION
 }
 
 enum MandateStatus {
   ACTIVE
-  EXPIRED
   PENDING
   FAILED
-  NOT_REQUIRED
 }
 
 enum SubscriptionTransactionStatus {
   SUCCESS
   FAILED
   PENDING
-  PROCESSING
-  NOT_INITIATED
   REFUNDED
 }
 
@@ -131,31 +126,20 @@ model SocietyPlanSettings {
   societyId String  @unique
   society   Society @relation(fields: [societyId], references: [id])
 
-  // e.g. max customers allowed for plan, trial info, plan reference to billing system
-  planId                   String? // external plan id (Razorpay)
-  planName                 String?
-  planAmount               Decimal?  @db.Decimal(14, 2)
-  currency                 String?   @default("INR")
-  maxCustomers             Int? // limit imposed by plan
-  isTrialUsed              Boolean   @default(false)
+  trialStartDate           DateTime?
   trialEndDate             DateTime?
-  graceUntil               DateTime?
   developerOverrideEnabled Boolean   @default(false)
 
   setupFeeEnabled        Boolean   @default(true)
   setupFeeAmount         Decimal   @default(50000) @db.Decimal(14, 2)
-  setupFeeDueAt          DateTime?
   setupFeePaid           Boolean   @default(false)
   setupFeePaidAt         DateTime?
   setupFeePaymentId      String?   @unique
-  setupFeePaymentLinkId  String?
-  setupFeePaymentLinkUrl String?
 
   customOneTimeFeeEnabled       Boolean   @default(false)
   customOneTimeFeeAmount        Decimal?  @db.Decimal(14, 2)
   customOneTimeFeeWaived        Boolean   @default(false)
   customSubscriptionEnabled     Boolean   @default(false)
-  customSubscriptionPlanId      String?
   customSubscriptionAmount      Decimal?  @db.Decimal(14, 2)
   customSubscriptionWaived      Boolean   @default(false)
   billingPolicySetByDeveloperId String?
@@ -182,6 +166,8 @@ model Subscription {
   planAmount    Decimal @db.Decimal(14, 2)
   billingPeriod Int // e.g., 30 days or month count
   currency      String  @default("INR")
+  oneTimeAddonApplied Boolean @default(false)
+  oneTimeAddonAmount  Decimal? @db.Decimal(14, 2)
 
   // Subscription lifecycle
   status            SubscriptionStatus
@@ -198,7 +184,6 @@ model Subscription {
 
   // Payment retry / failures
   retryCount Int @default(0)
-  maxRetries Int @default(3)
 
   // Grace period (when auto-debit fails)
   isInGrace    Boolean   @default(false)
@@ -222,12 +207,14 @@ model SubscriptionTransaction {
   id String @id @default(uuid())
 
   amount Decimal                       @db.Decimal(14, 2)
-  status SubscriptionTransactionStatus @default(NOT_INITIATED)
+  status SubscriptionTransactionStatus @default(PENDING)
   isPaid Boolean                       @default(false)
 
   razorpayPaymentId String?   @unique
+  razorpayRefundId  String?   @unique
   billingDate       DateTime
   paymentDate       DateTime?
+  refundDate        DateTime?
 
   paymentMethod     PaymentMethod?
   paymentCycleCount Int // cycle count at the time of billing

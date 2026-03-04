@@ -27,14 +27,6 @@ export type ResolveMemberSocietyValidationSchema = z.infer<
   typeof resolveMemberSocietyValidationSchema
 >;
 
-export const setupPermitRulesValidationSchema = z.object({
-  body: z.object({
-    societyId: z.uuid(),
-  }),
-});
-
-export type SetupPermitRulesValidationSchema = z.infer<typeof setupPermitRulesValidationSchema>;
-
 export const setupSubscriptionValidationSchema = z.object({
   body: z.object({
     societyId: z.uuid(),
@@ -43,15 +35,14 @@ export const setupSubscriptionValidationSchema = z.object({
 
 export type SetupSubscriptionValidationSchema = z.infer<typeof setupSubscriptionValidationSchema>;
 
-export const createSetupFeePaymentLinkValidationSchema = z.object({
+export const cancelSubscriptionValidationSchema = z.object({
   body: z.object({
     societyId: z.uuid(),
+    refundLatestPayment: z.boolean().optional().default(true),
   }),
 });
 
-export type CreateSetupFeePaymentLinkValidationSchema = z.infer<
-  typeof createSetupFeePaymentLinkValidationSchema
->;
+export type CancelSubscriptionValidationSchema = z.infer<typeof cancelSubscriptionValidationSchema>;
 
 export const getSocietyBillingOverviewValidationSchema = z.object({
   params: z.object({

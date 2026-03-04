@@ -26,13 +26,7 @@ CREATE TYPE "RecurringDepositTransactionType" AS ENUM ('CREDIT', 'PAYOUT');
 CREATE TYPE "ServiceType" AS ENUM ('FIX_DEPOSIT', 'RECURING_DEPOSIT', 'MONTHLY_INTEREST_SCHEME');
 
 -- CreateEnum
-CREATE TYPE "SocietyStatus" AS ENUM ('CREATED', 'PERMIT_PENDING', 'RAZORPAY_PENDING', 'ACTIVE');
-
--- CreateEnum
-CREATE TYPE "MembershipRole" AS ENUM ('OWNER', 'ADMIN', 'MANAGER', 'MEMBER');
-
--- CreateEnum
-CREATE TYPE "MembershipStatus" AS ENUM ('ACTIVE', 'SUSPENDED');
+CREATE TYPE "SocietyStatus" AS ENUM ('CREATED', 'RAZORPAY_PENDING', 'ACTIVE');
 
 -- CreateEnum
 CREATE TYPE "PaymentMethod" AS ENUM ('UPI', 'CASH', 'CHEQUE');
@@ -51,7 +45,6 @@ CREATE TABLE "Society" (
     "zipcode" TEXT NOT NULL,
     "logoUrl" TEXT NOT NULL,
     "status" "SocietyStatus" NOT NULL DEFAULT 'CREATED',
-    "permitTenantKey" TEXT,
     "isDeleted" BOOLEAN NOT NULL DEFAULT false,
     "deletedAt" TIMESTAMP(3),
     "createdBy" TEXT NOT NULL,
@@ -80,8 +73,6 @@ CREATE TABLE "SocietyPlanSettings" (
     "setupFeePaid" BOOLEAN NOT NULL DEFAULT false,
     "setupFeePaidAt" TIMESTAMP(3),
     "setupFeePaymentId" TEXT,
-    "setupFeePaymentLinkId" TEXT,
-    "setupFeePaymentLinkUrl" TEXT,
     "customOneTimeFeeEnabled" BOOLEAN NOT NULL DEFAULT false,
     "customOneTimeFeeAmount" DECIMAL(14,2),
     "customOneTimeFeeWaived" BOOLEAN NOT NULL DEFAULT false,
@@ -160,10 +151,9 @@ CREATE TABLE "SubscriptionStateTransition" (
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "email" TEXT,
+    "email" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
     "avatar" TEXT,
-    "permitUserKey" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -175,17 +165,24 @@ CREATE TABLE "Membership" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "societyId" TEXT NOT NULL,
-    "role" "MembershipRole" NOT NULL DEFAULT 'MEMBER',
-    "status" "MembershipStatus" NOT NULL DEFAULT 'ACTIVE',
-    "isDeleted" BOOLEAN NOT NULL DEFAULT false,
+    "roleId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
     "deletedAt" TIMESTAMP(3),
-    "createdBy" TEXT,
-    "updatedBy" TEXT,
     "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Membership_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SocietyRole" (
+    "id" TEXT NOT NULL,
+    "societyId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "isSystem" BOOLEAN NOT NULL DEFAULT false,
+    "permissions" TEXT[],
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SocietyRole_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -549,6 +546,12 @@ CREATE INDEX "Membership_societyId_idx" ON "Membership"("societyId");
 CREATE UNIQUE INDEX "Membership_userId_societyId_key" ON "Membership"("userId", "societyId");
 
 -- CreateIndex
+CREATE INDEX "SocietyRole_societyId_idx" ON "SocietyRole"("societyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SocietyRole_societyId_name_key" ON "SocietyRole"("societyId", "name");
+
+-- CreateIndex
 CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
 
 -- CreateIndex
@@ -643,6 +646,12 @@ ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("u
 
 -- AddForeignKey
 ALTER TABLE "Membership" ADD CONSTRAINT "Membership_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "SocietyRole"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SocietyRole" ADD CONSTRAINT "SocietyRole_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

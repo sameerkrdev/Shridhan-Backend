@@ -20,7 +20,11 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://62b7-47-31-92-61.ngrok-free.app"],
+    origin: [
+      "http://localhost:5173",
+      "https://mbqgsv18-5173.inc1.devtunnels.ms",
+      "https://mbqgsv18-5801.inc1.devtunnels.ms",
+    ],
     credentials: true,
   }),
 );

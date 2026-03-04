@@ -1,31 +1,28 @@
 import express from "express";
 import zodValidatorMiddleware from "@/middlewares/zodValidationMiddleware.js";
 import {
-  createSetupFeePaymentLinkValidationSchema,
+  cancelSubscriptionValidationSchema,
   getSocietyBillingOverviewValidationSchema,
   onboardSocietyValidationSchema,
   resolveMemberSocietyValidationSchema,
   setupSubscriptionValidationSchema,
-  setupPermitRulesValidationSchema,
 } from "@/zodValidationSchema/societyValidationSchema.js";
 import {
-  createSetupFeeLink,
+  cancelSubscription,
   getBillingOverview,
   listMemberSocieties,
   onboardSociety,
   resolveSelectedSociety,
   setupSubscription,
-  setupPermitRules,
 } from "@/controllers/societyController.js";
 import { authenticaionMiddleware } from "@/middlewares/authenticationMiddleware.js";
 import type {
   IOnboardSocietyRequest,
   IResolveMemberSocietyRequest,
-  ICreateSetupFeePaymentLinkRequest,
   IGetSocietyBillingOverviewRequest,
   ISetupSubscriptionRequest,
-  ISetupPermitRulesRequest,
   ISocietyUserRequest,
+  ICancelSubscriptionRequest,
 } from "@/types/society.js";
 
 const router: express.Router = express.Router();
@@ -56,24 +53,17 @@ router.post(
 );
 
 router.post(
-  "/permit/setup",
-  authenticaionMiddleware(),
-  zodValidatorMiddleware(setupPermitRulesValidationSchema),
-  (req, res, next) => setupPermitRules(req as ISetupPermitRulesRequest, res, next),
-);
-
-router.post(
-  "/setup-fee/link",
-  authenticaionMiddleware(),
-  zodValidatorMiddleware(createSetupFeePaymentLinkValidationSchema),
-  (req, res, next) => createSetupFeeLink(req as ICreateSetupFeePaymentLinkRequest, res, next),
-);
-
-router.post(
   "/subscription/setup",
   authenticaionMiddleware(),
   zodValidatorMiddleware(setupSubscriptionValidationSchema),
   (req, res, next) => setupSubscription(req as ISetupSubscriptionRequest, res, next),
+);
+
+router.post(
+  "/subscription/cancel",
+  authenticaionMiddleware(),
+  zodValidatorMiddleware(cancelSubscriptionValidationSchema),
+  (req, res, next) => cancelSubscription(req as ICancelSubscriptionRequest, res, next),
 );
 
 export default router;

@@ -1,21 +1,19 @@
 import { SocietyStatus } from "@/generated/prisma/client.js";
 import {
+  cancelSocietySubscription,
   createSociety,
   getSocietyBillingOverview,
   getMemberSocieties,
   resolveMemberSociety,
-  setupSocietyFeePaymentLink,
   setupSocietySubscriptionMandate,
-  setupSocietyPermitRules,
 } from "@/services/societyService.js";
 import type {
   IOnboardSocietyRequest,
   IResolveMemberSocietyRequest,
-  ISetupPermitRulesRequest,
   ISetupSubscriptionRequest,
-  ICreateSetupFeePaymentLinkRequest,
   IGetSocietyBillingOverviewRequest,
   ISocietyUserRequest,
+  ICancelSubscriptionRequest,
 } from "@/types/society.js";
 import type { Response, NextFunction } from "express";
 
@@ -42,7 +40,10 @@ export const onboardSociety = async (
       req.user,
     );
 
-    res.json(payload);
+    res.json({
+      ...payload,
+      mandateSetup: null,
+    });
   } catch (error) {
     next(error);
   }
@@ -75,19 +76,6 @@ export const resolveSelectedSociety = async (
   }
 };
 
-export const setupPermitRules = async (
-  req: ISetupPermitRulesRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const result = await setupSocietyPermitRules(req.user.id, req.body.societyId);
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-};
-
 export const setupSubscription = async (
   req: ISetupSubscriptionRequest,
   res: Response,
@@ -101,19 +89,6 @@ export const setupSubscription = async (
   }
 };
 
-export const createSetupFeeLink = async (
-  req: ICreateSetupFeePaymentLinkRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const result = await setupSocietyFeePaymentLink(req.user.id, req.body.societyId);
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
-};
-
 export const getBillingOverview = async (
   req: IGetSocietyBillingOverviewRequest,
   res: Response,
@@ -121,6 +96,23 @@ export const getBillingOverview = async (
 ) => {
   try {
     const result = await getSocietyBillingOverview(req.user.id, req.params.societyId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cancelSubscription = async (
+  req: ICancelSubscriptionRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const result = await cancelSocietySubscription(
+      req.user.id,
+      req.body.societyId,
+      req.body.refundLatestPayment,
+    );
     res.json(result);
   } catch (error) {
     next(error);

@@ -31,7 +31,7 @@ export const sendTrialStartedNotification = async (
   await sendBillingEmail({
     to: recipients,
     subject: "[Shridhan Billing] Trial Started",
-    title: "Your 30-day trial has started",
+    title: "Your 60-day trial has started",
     intro: "Your society has full access during trial.",
     statusLabel: "TRIAL_ACTIVE",
     details: [
@@ -64,7 +64,6 @@ export const sendSetupFeeDueReminder = async (
   societyId: string,
   societyName: string,
   dueAt: Date,
-  paymentLinkUrl?: string | null,
 ) => {
   const recipients = await getOwnerRecipients(societyId);
   await sendBillingEmail({
@@ -77,7 +76,6 @@ export const sendSetupFeeDueReminder = async (
       { label: "Society", value: societyName },
       { label: "Due At", value: dueAt.toISOString() },
     ],
-    ...(paymentLinkUrl ? { actionUrl: paymentLinkUrl, actionText: "Pay setup fee" } : {}),
   });
 };
 

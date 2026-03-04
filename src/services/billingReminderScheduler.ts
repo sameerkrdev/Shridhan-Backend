@@ -52,16 +52,15 @@ const processTrialAndSetupFeeReminders = async () => {
       settings.setupFeeEnabled &&
       !settings.customOneTimeFeeWaived &&
       !settings.setupFeePaid &&
-      settings.setupFeeDueAt &&
-      settings.setupFeeDueAt.getTime() <= now.getTime()
+      settings.trialEndDate &&
+      settings.trialEndDate.getTime() <= now.getTime()
     ) {
       const reminderKey = `billing:setup-fee-due:${settings.societyId}:${now.toISOString().slice(0, 10)}`;
       if (await shouldSendReminder(reminderKey, 24 * 60 * 60)) {
         await sendSetupFeeDueReminder(
           settings.societyId,
           settings.society.name,
-          settings.setupFeeDueAt,
-          settings.setupFeePaymentLinkUrl,
+          settings.trialEndDate,
         );
       }
     }

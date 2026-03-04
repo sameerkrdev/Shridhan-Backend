@@ -14,10 +14,10 @@ import env from "@/config/dotenv.js";
 import logger from "@/config/logger.js";
 import {
   billingGraceDays,
+  billingTrialDays,
   createSubscriptionTransitionLog,
 } from "@/services/subscriptionLifecycleService.js";
 import {
-  sendSetupFeeFailedNotification,
   sendSetupFeePaidNotification,
   sendSubscriptionStateNotification,
 } from "@/services/billingNotificationService.js";
@@ -25,9 +25,17 @@ import {
 interface RazorpayWebhookEvent {
   event: string;
   payload?: Record<string, unknown>;
+  created_at?: number;
 }
 
 const WEBHOOK_IDEMPOTENCY_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+const webhookSecrets = [
+  env.RAZORPAY_WEBHOOK_SECRET,
+  ...env.RAZORPAY_WEBHOOK_OLD_SECRETS.split(",")
+    .map((secret) => secret.trim())
+    .filter((secret) => secret.length > 0),
+];
 
 const addDays = (value: Date, days: number) => {
   const output = new Date(value);
@@ -57,6 +65,16 @@ const extractSubscriptionId = (eventPayload: RazorpayWebhookEvent) => {
   const directSubscriptionId = getNested(eventPayload, ["payload", "subscription", "entity", "id"]);
   if (typeof directSubscriptionId === "string" && directSubscriptionId.length > 0) {
     return directSubscriptionId;
+  }
+
+  const invoiceSubscriptionId = getNested(eventPayload, [
+    "payload",
+    "invoice",
+    "entity",
+    "subscription_id",
+  ]);
+  if (typeof invoiceSubscriptionId === "string" && invoiceSubscriptionId.length > 0) {
+    return invoiceSubscriptionId;
   }
 
   const paymentSubscriptionId = getNested(eventPayload, [
@@ -95,84 +113,55 @@ const extractPaymentInfo = (eventPayload: RazorpayWebhookEvent) => {
   };
 };
 
-const extractSetupFeeInfo = (eventPayload: RazorpayWebhookEvent) => {
-  const billingTypeFromPaymentLink = getNested(eventPayload, [
-    "payload",
-    "payment_link",
-    "entity",
-    "notes",
-    "billingType",
-  ]);
-  const billingTypeFromPayment = getNested(eventPayload, [
-    "payload",
-    "payment",
-    "entity",
-    "notes",
-    "billingType",
-  ]);
-  const societyIdFromPaymentLink = getNested(eventPayload, [
-    "payload",
-    "payment_link",
-    "entity",
-    "notes",
-    "societyId",
-  ]);
-  const societyIdFromPayment = getNested(eventPayload, [
-    "payload",
-    "payment",
-    "entity",
-    "notes",
-    "societyId",
-  ]);
-  const paymentId = getNested(eventPayload, ["payload", "payment", "entity", "id"]);
+const buildWebhookIdempotencyKey = (rawBody: Buffer, eventId?: string) => {
+  if (eventId && eventId.trim().length > 0) {
+    return `billing:webhook:razorpay:event:${eventId.trim()}`;
+  }
 
-  const billingType =
-    typeof billingTypeFromPaymentLink === "string"
-      ? billingTypeFromPaymentLink
-      : typeof billingTypeFromPayment === "string"
-        ? billingTypeFromPayment
-        : undefined;
-  const societyId =
-    typeof societyIdFromPaymentLink === "string"
-      ? societyIdFromPaymentLink
-      : typeof societyIdFromPayment === "string"
-        ? societyIdFromPayment
-        : undefined;
-
-  return {
-    isSetupFeeEvent: billingType === "setup_fee",
-    societyId,
-    paymentId: typeof paymentId === "string" ? paymentId : undefined,
-  };
+  // Razorpay recommends idempotent processing; fallback to payload hash when event id is absent.
+  const payloadHash = crypto.createHash("sha256").update(rawBody).digest("hex");
+  return `billing:webhook:razorpay:payload:${payloadHash}`;
 };
 
 export const verifyRazorpaySignature = (rawBody: Buffer, signature: string) => {
-  const expectedSignature = crypto
-    .createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET)
-    .update(rawBody)
-    .digest("hex");
+  const normalizedSignature = signature.trim();
+  const receivedBuffer = Buffer.from(normalizedSignature, "utf8");
 
-  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
-  const receivedBuffer = Buffer.from(signature, "utf8");
+  for (const webhookSecret of webhookSecrets) {
+    const expectedSignature = crypto
+      .createHmac("sha256", webhookSecret)
+      .update(rawBody)
+      .digest("hex");
+    const expectedBuffer = Buffer.from(expectedSignature, "utf8");
 
-  if (expectedBuffer.length !== receivedBuffer.length) {
-    return false;
+    if (expectedBuffer.length !== receivedBuffer.length) {
+      continue;
+    }
+
+    if (crypto.timingSafeEqual(expectedBuffer, receivedBuffer)) {
+      return true;
+    }
   }
 
-  return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+  return false;
 };
 
 export const processRazorpayWebhook = async (args: {
   rawBody: Buffer;
   signature: string;
-  eventId: string;
+  eventId?: string;
 }) => {
-  const parsedEvent = JSON.parse(args.rawBody.toString("utf8")) as RazorpayWebhookEvent;
-  const idempotencyKey = `billing:webhook:razorpay:${args.eventId}`;
+  let parsedEvent: RazorpayWebhookEvent;
+  try {
+    parsedEvent = JSON.parse(args.rawBody.toString("utf8")) as RazorpayWebhookEvent;
+  } catch {
+    throw createHttpError(400, "Invalid Razorpay webhook payload");
+  }
+  const idempotencyKey = buildWebhookIdempotencyKey(args.rawBody, args.eventId);
 
   logger.info({
     message: "Razorpay webhook received",
-    eventId: args.eventId,
+    eventId: args.eventId ?? null,
     eventType: parsedEvent.event,
   });
 
@@ -192,75 +181,27 @@ export const processRazorpayWebhook = async (args: {
   }
 
   try {
-    const setupFeeInfo = extractSetupFeeInfo(parsedEvent);
     if (
-      setupFeeInfo.isSetupFeeEvent &&
-      (parsedEvent.event === "payment_link.paid" || parsedEvent.event === "payment.captured")
-    ) {
-      if (!setupFeeInfo.societyId || !setupFeeInfo.paymentId) {
-        logger.error({
-          message: "Setup fee event missing society or payment id",
-          eventId: args.eventId,
-          eventType: parsedEvent.event,
-        });
-        return { duplicate: false };
-      }
-
-      await prisma.societyPlanSettings.update({
-        where: { societyId: setupFeeInfo.societyId },
-        data: {
-          setupFeePaid: true,
-          setupFeePaidAt: new Date(),
-          setupFeePaymentId: setupFeeInfo.paymentId,
-        },
-      });
-      const society = await prisma.society.findUnique({
-        where: { id: setupFeeInfo.societyId },
-        select: { name: true },
-      });
-      if (society) {
-        void sendSetupFeePaidNotification(
-          setupFeeInfo.societyId,
-          society.name,
-          setupFeeInfo.paymentId,
-        );
-      }
-
-      logger.info({
-        message: "Setup fee marked as paid",
-        eventId: args.eventId,
-        societyId: setupFeeInfo.societyId,
-        paymentId: setupFeeInfo.paymentId,
-      });
-      return { duplicate: false };
-    }
-
-    if (
-      setupFeeInfo.isSetupFeeEvent &&
-      (parsedEvent.event === "payment_link.cancelled" || parsedEvent.event === "payment.failed")
+      parsedEvent.event === "payment.authorized" ||
+      parsedEvent.event === "payment_link.expired" ||
+      parsedEvent.event === "payment_link.paid" ||
+      parsedEvent.event === "payment_link.partially_paid" ||
+      parsedEvent.event === "payment_link.cancelled" ||
+      parsedEvent.event === "order.paid"
     ) {
       logger.info({
-        message: "Setup fee payment failed/cancelled",
-        eventId: args.eventId,
-        societyId: setupFeeInfo.societyId,
+        message: "Razorpay webhook event acknowledged with no state transition",
+        eventId: args.eventId ?? null,
+        eventType: parsedEvent.event,
       });
-      if (setupFeeInfo.societyId) {
-        const society = await prisma.society.findUnique({
-          where: { id: setupFeeInfo.societyId },
-          select: { name: true },
-        });
-        if (society) {
-          void sendSetupFeeFailedNotification(setupFeeInfo.societyId, society.name);
-        }
-      }
       return { duplicate: false };
     }
 
     const razorpaySubscriptionId = extractSubscriptionId(parsedEvent);
     if (!razorpaySubscriptionId) {
-      logger.error({
-        message: "Razorpay webhook missing subscription id",
-        eventId: args.eventId,
+      logger.info({
+        message: "Razorpay webhook has no subscription id; no subscription state transition",
+        eventId: args.eventId ?? null,
         eventType: parsedEvent.event,
       });
       return { duplicate: false };
@@ -283,7 +224,83 @@ export const processRazorpayWebhook = async (args: {
       const now = new Date();
       const paymentInfo = extractPaymentInfo(parsedEvent);
 
-      if (parsedEvent.event === "subscription.activated") {
+      if (
+        parsedEvent.event === "subscription.authenticated" ||
+        parsedEvent.event === "subscription.activated"
+      ) {
+        if (
+          subscription.status === SubscriptionStatus.CANCELLED ||
+          subscription.status === SubscriptionStatus.PAUSED
+        ) {
+          logger.warn({
+            message: "Ignoring activation for non-resumable subscription state",
+            eventId: args.eventId ?? null,
+            subscriptionId: subscription.id,
+            currentStatus: subscription.status,
+          });
+          return;
+        }
+
+        const settings = await tx.societyPlanSettings.findUnique({
+          where: { societyId: subscription.societyId },
+          select: { trialEndDate: true },
+        });
+        const trialEndDate = settings?.trialEndDate ?? addDays(now, billingTrialDays);
+
+        await tx.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: SubscriptionStatus.ACTIVE,
+            isActive: true,
+            mandateStatus: MandateStatus.ACTIVE,
+            mandateUpdatedAt: now,
+            isInGrace: false,
+            graceEndDate: null,
+            nextBillingAt: trialEndDate,
+          },
+        });
+
+        await tx.society.update({
+          where: { id: subscription.societyId },
+          data: { status: SocietyStatus.ACTIVE },
+        });
+
+        await createSubscriptionTransitionLog(tx, {
+          subscriptionId: subscription.id,
+          fromStatus: subscription.status,
+          toStatus: SubscriptionStatus.ACTIVE,
+          reason:
+            parsedEvent.event === "subscription.authenticated"
+              ? "WEBHOOK_SUBSCRIPTION_AUTHENTICATED"
+              : "WEBHOOK_SUBSCRIPTION_ACTIVATED",
+        });
+        const society = await tx.society.findUnique({
+          where: { id: subscription.societyId },
+          select: { name: true },
+        });
+        if (society) {
+          void sendSubscriptionStateNotification(
+            subscription.societyId,
+            society.name,
+            parsedEvent.event === "subscription.authenticated"
+              ? "Subscription Mandate Authenticated"
+              : "Subscription Activated",
+            "SUBSCRIPTION_ACTIVE",
+          );
+        }
+        return;
+      }
+
+      if (parsedEvent.event === "subscription.resumed") {
+        if (subscription.status === SubscriptionStatus.CANCELLED) {
+          logger.warn({
+            message: "Ignoring resume event for cancelled subscription",
+            eventId: args.eventId ?? null,
+            subscriptionId: subscription.id,
+          });
+          return;
+        }
+
         await tx.subscription.update({
           where: { id: subscription.id },
           data: {
@@ -301,16 +318,11 @@ export const processRazorpayWebhook = async (args: {
           data: { status: SocietyStatus.ACTIVE },
         });
 
-        await tx.societyPlanSettings.updateMany({
-          where: { societyId: subscription.societyId },
-          data: { graceUntil: null },
-        });
-
         await createSubscriptionTransitionLog(tx, {
           subscriptionId: subscription.id,
           fromStatus: subscription.status,
           toStatus: SubscriptionStatus.ACTIVE,
-          reason: "WEBHOOK_SUBSCRIPTION_ACTIVATED",
+          reason: "WEBHOOK_SUBSCRIPTION_RESUMED",
         });
         const society = await tx.society.findUnique({
           where: { id: subscription.societyId },
@@ -320,7 +332,7 @@ export const processRazorpayWebhook = async (args: {
           void sendSubscriptionStateNotification(
             subscription.societyId,
             society.name,
-            "Subscription Activated",
+            "Subscription Resumed",
             "SUBSCRIPTION_ACTIVE",
           );
         }
@@ -329,8 +341,18 @@ export const processRazorpayWebhook = async (args: {
 
       if (
         parsedEvent.event === "subscription.charged" ||
-        parsedEvent.event === "payment.captured"
+        parsedEvent.event === "payment.captured" ||
+        parsedEvent.event === "invoice.paid"
       ) {
+        if (subscription.status === SubscriptionStatus.CANCELLED) {
+          logger.warn({
+            message: "Ignoring charge success for cancelled subscription",
+            eventId: args.eventId ?? null,
+            subscriptionId: subscription.id,
+          });
+          return;
+        }
+
         await tx.subscription.update({
           where: { id: subscription.id },
           data: {
@@ -342,11 +364,6 @@ export const processRazorpayWebhook = async (args: {
             previousBillingAt: now,
             nextBillingAt: addDays(now, 30),
           },
-        });
-
-        await tx.societyPlanSettings.updateMany({
-          where: { societyId: subscription.societyId },
-          data: { graceUntil: null },
         });
 
         if (paymentInfo.paymentId) {
@@ -368,6 +385,56 @@ export const processRazorpayWebhook = async (args: {
               paymentCycleCount: subscription.retryCount + 1,
               subscriptionId: subscription.id,
             },
+          });
+        }
+
+        const planSettings = await tx.societyPlanSettings.findUnique({
+          where: { societyId: subscription.societyId },
+          select: {
+            setupFeeEnabled: true,
+            setupFeePaid: true,
+            customOneTimeFeeWaived: true,
+            developerOverrideEnabled: true,
+          },
+        });
+
+        const shouldMarkSetupFeePaid = Boolean(
+          planSettings &&
+          planSettings.setupFeeEnabled &&
+          !planSettings.setupFeePaid &&
+          !planSettings.customOneTimeFeeWaived &&
+          !planSettings.developerOverrideEnabled &&
+          subscription.oneTimeAddonApplied &&
+          paymentInfo.paymentId,
+        );
+
+        if (shouldMarkSetupFeePaid) {
+          await tx.societyPlanSettings.update({
+            where: { societyId: subscription.societyId },
+            data: {
+              setupFeePaid: true,
+              setupFeePaidAt: now,
+              setupFeePaymentId: paymentInfo.paymentId!,
+            },
+          });
+
+          const society = await tx.society.findUnique({
+            where: { id: subscription.societyId },
+            select: { name: true },
+          });
+          if (society) {
+            void sendSetupFeePaidNotification(
+              subscription.societyId,
+              society.name,
+              paymentInfo.paymentId!,
+            );
+          }
+
+          logger.info({
+            message: "Setup fee marked as paid from subscription charge",
+            eventId: args.eventId ?? null,
+            societyId: subscription.societyId,
+            paymentId: paymentInfo.paymentId,
           });
         }
 
@@ -393,6 +460,20 @@ export const processRazorpayWebhook = async (args: {
       }
 
       if (parsedEvent.event === "payment.failed" || parsedEvent.event === "subscription.pending") {
+        if (
+          subscription.status === SubscriptionStatus.CANCELLED ||
+          subscription.status === SubscriptionStatus.PAUSED
+        ) {
+          logger.warn({
+            message: "Ignoring late failure/pending event for terminal or paused subscription",
+            eventId: args.eventId ?? null,
+            subscriptionId: subscription.id,
+            currentStatus: subscription.status,
+            eventType: parsedEvent.event,
+          });
+          return;
+        }
+
         const graceEndDate = addDays(now, billingGraceDays);
 
         await tx.subscription.update({
@@ -404,11 +485,6 @@ export const processRazorpayWebhook = async (args: {
             isActive: true,
             retryCount: subscription.retryCount + 1,
           },
-        });
-
-        await tx.societyPlanSettings.updateMany({
-          where: { societyId: subscription.societyId },
-          data: { graceUntil: graceEndDate },
         });
 
         await tx.subscriptionTransaction.create({
@@ -445,7 +521,10 @@ export const processRazorpayWebhook = async (args: {
         return;
       }
 
-      if (parsedEvent.event === "subscription.halted") {
+      if (
+        parsedEvent.event === "subscription.halted" ||
+        parsedEvent.event === "subscription.paused"
+      ) {
         await tx.subscription.update({
           where: { id: subscription.id },
           data: {
@@ -458,16 +537,14 @@ export const processRazorpayWebhook = async (args: {
           },
         });
 
-        await tx.societyPlanSettings.updateMany({
-          where: { societyId: subscription.societyId },
-          data: { graceUntil: null },
-        });
-
         await createSubscriptionTransitionLog(tx, {
           subscriptionId: subscription.id,
           fromStatus: subscription.status,
           toStatus: SubscriptionStatus.PAUSED,
-          reason: "WEBHOOK_MANDATE_FAILED",
+          reason:
+            parsedEvent.event === "subscription.paused"
+              ? "WEBHOOK_SUBSCRIPTION_PAUSED"
+              : "WEBHOOK_MANDATE_FAILED",
         });
         const society = await tx.society.findUnique({
           where: { id: subscription.societyId },
@@ -484,7 +561,10 @@ export const processRazorpayWebhook = async (args: {
         return;
       }
 
-      if (parsedEvent.event === "subscription.cancelled") {
+      if (
+        parsedEvent.event === "subscription.cancelled" ||
+        parsedEvent.event === "subscription.completed"
+      ) {
         await tx.subscription.update({
           where: { id: subscription.id },
           data: {
@@ -495,16 +575,14 @@ export const processRazorpayWebhook = async (args: {
           },
         });
 
-        await tx.societyPlanSettings.updateMany({
-          where: { societyId: subscription.societyId },
-          data: { graceUntil: null },
-        });
-
         await createSubscriptionTransitionLog(tx, {
           subscriptionId: subscription.id,
           fromStatus: subscription.status,
           toStatus: SubscriptionStatus.CANCELLED,
-          reason: "WEBHOOK_SUBSCRIPTION_CANCELLED",
+          reason:
+            parsedEvent.event === "subscription.completed"
+              ? "WEBHOOK_SUBSCRIPTION_COMPLETED"
+              : "WEBHOOK_SUBSCRIPTION_CANCELLED",
         });
         const society = await tx.society.findUnique({
           where: { id: subscription.societyId },

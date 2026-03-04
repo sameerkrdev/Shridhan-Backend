@@ -4,8 +4,8 @@ import logger from "@/config/logger.js";
 import type { Prisma } from "@/generated/prisma/client.js";
 import createHttpError from "http-errors";
 import {
+  cancelSubscriptionAndRefund,
   initializeSocietyTrial,
-  createSetupFeePaymentLink,
   setupSubscriptionMandate,
 } from "@/services/subscriptionLifecycleService.js";
 import { sendTrialStartedNotification } from "@/services/billingNotificationService.js";
@@ -53,7 +53,7 @@ const SYSTEM_ROLE_PERMISSIONS: Record<string, string[]> = {
 };
 
 const statusRouteMap: Record<SocietyStatusKey, string> = {
-  CREATED: "/onboarding/permit",
+  CREATED: "/",
   RAZORPAY_PENDING: "/",
   ACTIVE: "/",
 };
@@ -69,7 +69,6 @@ export const createSociety = async (data: Prisma.SocietyCreateInput, creator: Pr
 
   const payload = await prisma.$transaction(async (tx) => {
     const createdSociety = await tx.society.create({ data });
-    await initializeSocietyTrial(tx, createdSociety.id);
 
     const createdRoles = await Promise.all(
       Object.entries(SYSTEM_ROLE_PERMISSIONS).map(([name, permissions]) =>
@@ -102,6 +101,8 @@ export const createSociety = async (data: Prisma.SocietyCreateInput, creator: Pr
       },
     });
 
+    await initializeSocietyTrial(tx, createdSociety.id, new Date());
+
     return { society: createdSociety, membership };
   });
 
@@ -110,19 +111,19 @@ export const createSociety = async (data: Prisma.SocietyCreateInput, creator: Pr
     data: { status: SocietyStatus.ACTIVE },
   });
 
+  const trialSettings = await prisma.societyPlanSettings.findUnique({
+    where: { societyId: payload.society.id },
+    select: { trialEndDate: true },
+  });
+  if (trialSettings?.trialEndDate) {
+    void sendTrialStartedNotification(payload.society.id, society.name, trialSettings.trialEndDate);
+  }
+
   logger.info({
     message: "Society created with in-house RBAC setup",
     societyId: payload.society.id,
     userId: creator.id,
   });
-
-  const planSettings = await prisma.societyPlanSettings.findUnique({
-    where: { societyId: society.id },
-    select: { trialEndDate: true },
-  });
-  if (planSettings?.trialEndDate) {
-    void sendTrialStartedNotification(society.id, society.name, planSettings.trialEndDate);
-  }
 
   return { society, membership: payload.membership };
 };
@@ -184,32 +185,6 @@ export const resolveMemberSociety = async (userId: string, societyId: string) =>
   };
 };
 
-export const setupSocietyPermitRules = async (userId: string, societyId: string) => {
-  const membership = await prisma.membership.findFirst({
-    where: { userId, societyId, deletedAt: null },
-    include: { society: true },
-  });
-  if (!membership || !membership.society) {
-    throw createHttpError(403, "You are not a member of this society");
-  }
-  const updatedSociety = await prisma.society.update({
-    where: { id: membership.society.id },
-    data: { status: SocietyStatus.ACTIVE },
-  });
-
-  logger.info({
-    message: "Society rules setup completed",
-    societyId: membership.society.id,
-    userId,
-  });
-
-  return {
-    societyId: updatedSociety.id,
-    status: updatedSociety.status,
-    nextRoute: statusRouteMap[updatedSociety.status as SocietyStatusKey],
-  };
-};
-
 export const setupSocietySubscriptionMandate = async (userId: string, societyId: string) => {
   const membership = await prisma.membership.findFirst({
     where: { userId, societyId, deletedAt: null },
@@ -220,14 +195,12 @@ export const setupSocietySubscriptionMandate = async (userId: string, societyId:
   return setupSubscriptionMandate(userId, societyId);
 };
 
-export const setupSocietyFeePaymentLink = async (userId: string, societyId: string) => {
-  const membership = await prisma.membership.findFirst({
-    where: { userId, societyId, deletedAt: null },
-    select: { id: true },
-  });
-  if (!membership) throw createHttpError(403, "You are not a member of this society");
-
-  return createSetupFeePaymentLink(userId, societyId);
+export const cancelSocietySubscription = async (
+  userId: string,
+  societyId: string,
+  refundLatestPayment = true,
+) => {
+  return cancelSubscriptionAndRefund(userId, societyId, refundLatestPayment);
 };
 
 export const getSocietyBillingOverview = async (userId: string, societyId: string) => {
@@ -252,12 +225,14 @@ export const getSocietyBillingOverview = async (userId: string, societyId: strin
     where: { societyId },
     orderBy: { updatedAt: "desc" },
   });
-  const transactions = latestSubscription
-    ? await prisma.subscriptionTransaction.findMany({
-        where: { subscriptionId: latestSubscription.id },
-        orderBy: { createdAt: "desc" },
-      })
-    : [];
+  const transactions = await prisma.subscriptionTransaction.findMany({
+    where: {
+      subscription: {
+        societyId,
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
   const now = new Date();
   const trialEndDate = settings?.trialEndDate ?? null;
@@ -277,9 +252,8 @@ export const getSocietyBillingOverview = async (userId: string, societyId: strin
       amount: settings?.setupFeeAmount?.toString() ?? "50000",
       paid: settings?.setupFeePaid ?? false,
       paidAt: settings?.setupFeePaidAt ?? null,
-      dueAt: settings?.setupFeeDueAt ?? trialEndDate,
+      dueAt: trialEndDate,
       paymentId: settings?.setupFeePaymentId ?? null,
-      paymentLinkUrl: settings?.setupFeePaymentLinkUrl ?? null,
       waived: settings?.customOneTimeFeeWaived ?? false,
     },
     override: { enabled: settings?.developerOverrideEnabled ?? false },

@@ -4,6 +4,13 @@ import { verifyAccessToken } from "@/services/authTokenService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 import type { Request, Response, NextFunction } from "express";
 import createHttpError from "http-errors";
+import { z } from "zod";
+
+const societyQuerySchema = z
+  .object({
+    societyId: z.uuid().optional(),
+  })
+  .passthrough();
 
 export const authenticaionMiddleware = () => {
   return async (req: Request, _: Response, next: NextFunction) => {
@@ -47,9 +54,13 @@ export const authenticaionMiddleware = () => {
       authorizedReq.user = user;
       authorizedReq.session = session.id;
 
+      const validatedQuery = societyQuerySchema.safeParse(req.query);
+      if (!validatedQuery.success) {
+        throw createHttpError(400, "Invalid query parameters");
+      }
+
       const societyId =
-        (req.headers["x-society-id"] as string | undefined) ??
-        (req.query.societyId as string | undefined);
+        (req.headers["x-society-id"] as string | undefined) ?? validatedQuery.data.societyId;
 
       if (societyId) {
         const membership = await prisma.membership.findFirst({

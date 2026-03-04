@@ -24,15 +24,11 @@ export const handleRazorpayWebhook = async (req: Request, res: Response, next: N
     const signature = readHeaderValue(req.headers["x-razorpay-signature"]);
     const eventId = readHeaderValue(req.headers["x-razorpay-event-id"]);
 
-    if (!eventId) {
-      throw createHttpError(400, "Missing Razorpay event id header");
-    }
-
     validateRazorpayWebhookOrThrow(req.body, signature);
     await processRazorpayWebhook({
       rawBody: req.body,
       signature: signature!,
-      eventId,
+      ...(eventId ? { eventId } : {}),
     });
 
     res.status(200).json({ received: true });
