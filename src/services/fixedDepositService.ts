@@ -32,6 +32,7 @@ export const createProjectType = async (
   data: {
     name: string;
     duration: number;
+    minimumAmount: number;
     maturityAmountPerHundred: number;
     maturityMultiple: number;
   },
@@ -40,6 +41,7 @@ export const createProjectType = async (
     data: {
       name: data.name,
       duration: data.duration,
+      minimumAmount: new Prisma.Decimal(data.minimumAmount),
       maturityAmountPerHundred: new Prisma.Decimal(data.maturityAmountPerHundred),
       maturityMultiple: new Prisma.Decimal(data.maturityMultiple),
       societyId: actor.societyId,
@@ -197,6 +199,12 @@ export const createFdAccount = async (
     }
 
     const depositAmount = new Prisma.Decimal(data.fd.depositAmount);
+    if (depositAmount.lt(projectType.minimumAmount)) {
+      throw createHttpError(
+        400,
+        `Deposit amount must be greater than or equal to minimum amount (${projectType.minimumAmount.toFixed(2)})`,
+      );
+    }
     const initialPaymentAmountDecimal = new Prisma.Decimal(initialPaymentAmount);
     const maturityAmount = depositAmount.div(100).mul(projectType.maturityAmountPerHundred);
     const maturityDate = calculateMaturityDate(new Date(data.fd.startDate), projectType.duration);

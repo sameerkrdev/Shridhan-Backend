@@ -37,6 +37,7 @@ export const createProjectTypeSchema = z.object({
   body: z.object({
     name: z.string().trim().min(2, "Name is required").max(120),
     duration: z.number().int().min(1, "Duration must be at least 1 month").max(360),
+    minimumAmount: z.number().min(1, "Minimum amount must be greater than 0").max(100000000),
     maturityAmountPerHundred: z
       .number()
       .min(1, "Maturity amount per hundred must be greater than 0")
