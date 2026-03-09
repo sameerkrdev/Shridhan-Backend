@@ -39,6 +39,7 @@ enum LoanEmiStatus {
 }
 
 enum ServiceStatus {
+  PENDING_DEPOSIT
   ACTIVE
   COMPLETED
   CLOSED
@@ -47,6 +48,9 @@ enum ServiceStatus {
 enum TransactionType {
   CREDIT
   PAYOUT
+  DEPOSIT
+  INTEREST_PAYOUT
+  PRINCIPAL_RETURN
 }
 
 enum RecurringDepositTransactionType {
@@ -389,6 +393,7 @@ model FixedDepositProjectType {
   id   String @id @default(uuid())
   name String
 
+  minimumAmount            Decimal @default(0) @db.Decimal(14, 2)
   maturityMultiple         Decimal @db.Decimal(14, 2)
   maturityAmountPerHundred Decimal @db.Decimal(14, 2)
   duration                 Int
@@ -528,8 +533,11 @@ model MonthlyInterestSchemeProjectType {
   id   String @id @default(uuid())
   name String
 
-  payoutInPercentPerHundred Decimal @db.Decimal(14, 2)
-  payoutPerHundred          Decimal @db.Decimal(14, 2)
+  minimumAmount               Decimal  @default(0) @db.Decimal(14, 2)
+  payoutInPercentPerHundred Decimal? @db.Decimal(14, 2)
+  payoutPerHundred          Decimal? @db.Decimal(14, 2)
+  monthlyInterestRate       Decimal? @db.Decimal(14, 2)
+  monthlyInterestPerLakh    Decimal? @db.Decimal(14, 2)
   duration                  Int
 
   // versioning + archival
@@ -558,6 +566,8 @@ model MonthlyInterestSchemeProjectType {
 model MonthlyInterestScheme {
   id String @id @default(uuid())
 
+  depositAmount   Decimal @default(0) @db.Decimal(14, 2)
+  monthlyInterest Decimal @default(0) @db.Decimal(14, 2)
   startDate      DateTime
   maturityAmount Decimal       @db.Decimal(14, 2)
   maturityDate   DateTime
@@ -588,6 +598,7 @@ model MonthlyInterestScheme {
 model MonthlyInterestSchemeTransaction {
   id String @id @default(uuid())
 
+  isExpected Boolean @default(false)
   month  Int?
   amount Decimal         @db.Decimal(14, 2)
   type   TransactionType
@@ -613,6 +624,7 @@ model MonthlyInterestSchemeTransaction {
 
   @@index([monthlyInterestSchemeId])
   @@index([transactionId])
+  @@index([monthlyInterestSchemeId, month, isExpected])
 }
 
 // TODO: Recheck the model of RD and Loan and its fine system 

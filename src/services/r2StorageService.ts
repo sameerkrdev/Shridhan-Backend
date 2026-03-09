@@ -45,6 +45,16 @@ export const buildFdDocumentObjectKey = (
   return `societies/${sanitizePathPart(societyId)}/fixed-deposits/${sanitizePathPart(fixDepositId)}/${timestamp}-${safeName}`;
 };
 
+export const buildMisDocumentObjectKey = (
+  societyId: string,
+  monthlyInterestSchemeId: string,
+  fileName: string,
+) => {
+  const timestamp = Date.now();
+  const safeName = sanitizePathPart(fileName || "document");
+  return `societies/${sanitizePathPart(societyId)}/mis/${sanitizePathPart(monthlyInterestSchemeId)}/${timestamp}-${safeName}`;
+};
+
 export const getFdDocumentPublicUrl = (objectKey: string) => {
   assertR2Configured();
   const base = env.R2_PUBLIC_BASE_URL.replace(/\/+$/, "");
@@ -65,3 +75,10 @@ export const generateFdDocumentUploadUrl = async (params: {
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: 60 * 10 });
   return uploadUrl;
 };
+
+export const getMisDocumentPublicUrl = (objectKey: string) => getFdDocumentPublicUrl(objectKey);
+
+export const generateMisDocumentUploadUrl = async (params: {
+  objectKey: string;
+  contentType?: string;
+}) => generateFdDocumentUploadUrl(params);

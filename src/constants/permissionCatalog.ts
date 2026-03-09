@@ -1,4 +1,10 @@
-export type PermissionResource = "membership" | "society" | "role" | "user" | "fixed_deposit";
+export type PermissionResource =
+  | "membership"
+  | "society"
+  | "role"
+  | "user"
+  | "fixed_deposit"
+  | "mis";
 
 export interface PermissionResourceMeta {
   key: PermissionResource;
@@ -39,6 +45,11 @@ export const PERMISSION_RESOURCES: PermissionResourceMeta[] = [
     key: "fixed_deposit",
     label: "Fixed Deposit Management",
     description: "Manage fixed deposit plans, accounts, and transactions.",
+  },
+  {
+    key: "mis",
+    label: "Monthly Interest Scheme Management",
+    description: "Manage MIS project types, accounts, deposits, interest payouts, and closure.",
   },
 ];
 
@@ -182,6 +193,69 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     action: "remove_project_type",
     label: "Remove Fixed Deposit Project Types",
     description: "Soft delete fixed deposit project types.",
+  },
+  {
+    key: "mis.create",
+    resource: "mis",
+    action: "create",
+    label: "Create MIS Accounts",
+    description: "Create MIS project types and MIS accounts.",
+  },
+  {
+    key: "mis.read",
+    resource: "mis",
+    action: "read",
+    label: "View MIS Account",
+    description: "View details of an MIS account.",
+  },
+  {
+    key: "mis.list",
+    resource: "mis",
+    action: "list",
+    label: "View MIS Accounts",
+    description: "View all MIS accounts and project types in the society.",
+  },
+  {
+    key: "mis.deposit",
+    resource: "mis",
+    action: "deposit",
+    label: "Record MIS Deposits",
+    description: "Record split or full MIS deposit transactions.",
+  },
+  {
+    key: "mis.pay_interest",
+    resource: "mis",
+    action: "pay_interest",
+    label: "Record MIS Interest Payouts",
+    description: "Record monthly interest payouts for MIS accounts.",
+  },
+  {
+    key: "mis.return_principal",
+    resource: "mis",
+    action: "return_principal",
+    label: "Return MIS Principal",
+    description: "Return principal amount on MIS maturity and close account.",
+  },
+  {
+    key: "mis.update_status",
+    resource: "mis",
+    action: "update_status",
+    label: "Update MIS Status",
+    description: "Manually update MIS account status where allowed.",
+  },
+  {
+    key: "mis.remove",
+    resource: "mis",
+    action: "remove",
+    label: "Remove MIS Accounts",
+    description: "Soft delete MIS accounts.",
+  },
+  {
+    key: "mis.remove_project_type",
+    resource: "mis",
+    action: "remove_project_type",
+    label: "Remove MIS Project Types",
+    description: "Soft delete MIS project types.",
   },
 ];
 
