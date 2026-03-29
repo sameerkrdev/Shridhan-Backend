@@ -4,7 +4,8 @@ export type PermissionResource =
   | "role"
   | "user"
   | "fixed_deposit"
-  | "mis";
+  | "mis"
+  | "recurring_deposit";
 
 export interface PermissionResourceMeta {
   key: PermissionResource;
@@ -50,6 +51,11 @@ export const PERMISSION_RESOURCES: PermissionResourceMeta[] = [
     key: "mis",
     label: "Monthly Interest Scheme Management",
     description: "Manage MIS project types, accounts, deposits, interest payouts, and closure.",
+  },
+  {
+    key: "recurring_deposit",
+    label: "Recurring Deposit Management",
+    description: "Manage RD project types, accounts, installments, payments, and maturity withdrawal.",
   },
 ];
 
@@ -256,6 +262,55 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     action: "remove_project_type",
     label: "Remove MIS Project Types",
     description: "Soft delete MIS project types.",
+  },
+  {
+    key: "recurring_deposit.create",
+    resource: "recurring_deposit",
+    action: "create",
+    label: "Create RD Accounts",
+    description: "Create RD project types and RD accounts.",
+  },
+  {
+    key: "recurring_deposit.read",
+    resource: "recurring_deposit",
+    action: "read",
+    label: "View RD Account",
+    description: "View details of an RD account.",
+  },
+  {
+    key: "recurring_deposit.list",
+    resource: "recurring_deposit",
+    action: "list",
+    label: "View RD Accounts",
+    description: "View all RD accounts and project types in the society.",
+  },
+  {
+    key: "recurring_deposit.pay",
+    resource: "recurring_deposit",
+    action: "pay",
+    label: "Record RD Payments",
+    description: "Preview and record installment payments for RD accounts.",
+  },
+  {
+    key: "recurring_deposit.withdraw",
+    resource: "recurring_deposit",
+    action: "withdraw",
+    label: "RD Maturity Withdrawal",
+    description: "Withdraw maturity amount after all installments are paid.",
+  },
+  {
+    key: "recurring_deposit.remove",
+    resource: "recurring_deposit",
+    action: "remove",
+    label: "Remove RD Accounts",
+    description: "Soft delete RD accounts.",
+  },
+  {
+    key: "recurring_deposit.remove_project_type",
+    resource: "recurring_deposit",
+    action: "remove_project_type",
+    label: "Remove RD Project Types",
+    description: "Soft delete RD project types.",
   },
 ];
 

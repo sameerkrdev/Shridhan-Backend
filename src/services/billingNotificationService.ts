@@ -6,7 +6,7 @@ const getOwnerRecipients = async (societyId: string) => {
     where: {
       societyId,
       deletedAt: null,
-      role: { name: "OWNER" },
+      role: { is: { name: "OWNER" } },
     },
     select: { userId: true },
   });

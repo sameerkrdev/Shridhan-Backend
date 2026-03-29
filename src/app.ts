@@ -12,6 +12,7 @@ import userRouter from "@/routes/userRoutes.js";
 import internalBillingRouter from "@/routes/internalBillingRoutes.js";
 import fixedDepositRouter from "@/routes/fixedDepositRoutes.js";
 import misRouter from "@/routes/misRoutes.js";
+import recurringDepositRouter from "@/routes/recurringDepositRoutes.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 
@@ -42,6 +43,7 @@ app.use("/api/v1/users", userRouter);
 app.use("/api/v1/internal/billing", internalBillingRouter);
 app.use("/api/v1/fixed-deposits", fixedDepositRouter);
 app.use("/api/v1/mis", misRouter);
+app.use("/api/v1/recurring-deposits", recurringDepositRouter);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Welcome to Shridhan", status: "Server is running!" });
