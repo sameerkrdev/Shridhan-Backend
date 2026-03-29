@@ -247,12 +247,13 @@ model Nominee {
 }
 
 model FixedDepositProjectType {
-  id                       String       @id @default(uuid())
-  name                     String
-  minimumAmount            Decimal      @default(0) @db.Decimal(14, 2)
-  maturityMultiple         Decimal      @db.Decimal(14, 2)
-  maturityAmountPerHundred Decimal      @db.Decimal(14, 2)
-  duration                 Int
+  id                          String                     @id @default(uuid())
+  name                        String
+  minimumAmount               Decimal                    @default(0) @db.Decimal(14, 2)
+  maturityMultiple            Decimal                    @db.Decimal(14, 2)
+  maturityAmountPerHundred    Decimal                    @db.Decimal(14, 2)
+  maturityCalculationMethod   MaturityCalculationMethod  @default(PER_RS_100)
+  duration                    Int
   version                  Int          @default(1)
   isArchived               Boolean      @default(false)
   societyId                String
@@ -673,4 +674,9 @@ enum CustomerAccountType {
   FIXED_DEPOSIT
   MONTHLY_INTEREST_SCHEME
   RECURING_DEPOSIT
+}
+
+enum MaturityCalculationMethod {
+  PER_RS_100
+  MULTIPLE_OF_PRINCIPAL
 }

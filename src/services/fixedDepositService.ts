@@ -2,6 +2,7 @@ import prisma from "@/config/prisma.js";
 import {
   Prisma,
   CustomerAccountType,
+  type MaturityCalculationMethod,
   type PaymentMethod,
   ServiceType,
   ServiceStatus,
@@ -27,23 +28,41 @@ const calculateMaturityDate = (startDate: Date, durationInMonths: number) => {
   return maturityDate;
 };
 
+const computeFdMaturityAmount = (
+  depositAmount: Prisma.Decimal,
+  projectType: {
+    maturityCalculationMethod: MaturityCalculationMethod;
+    maturityAmountPerHundred: Prisma.Decimal;
+    maturityMultiple: Prisma.Decimal;
+  },
+) => {
+  if (projectType.maturityCalculationMethod === "MULTIPLE_OF_PRINCIPAL") {
+    return depositAmount.mul(projectType.maturityMultiple);
+  }
+  return depositAmount.div(100).mul(projectType.maturityAmountPerHundred);
+};
+
 export const createProjectType = async (
   actor: Prisma.MembershipModel,
   data: {
     name: string;
     duration: number;
     minimumAmount: number;
-    maturityAmountPerHundred: number;
-    maturityMultiple: number;
+    maturityCalculationMethod: "PER_RS_100" | "MULTIPLE_OF_PRINCIPAL";
+    maturityValue: number;
   },
 ) => {
+  const isPerRs100 = data.maturityCalculationMethod === "PER_RS_100";
   return prisma.fixedDepositProjectType.create({
     data: {
       name: data.name,
       duration: data.duration,
       minimumAmount: new Prisma.Decimal(data.minimumAmount),
-      maturityAmountPerHundred: new Prisma.Decimal(data.maturityAmountPerHundred),
-      maturityMultiple: new Prisma.Decimal(data.maturityMultiple),
+      maturityCalculationMethod: data.maturityCalculationMethod,
+      maturityAmountPerHundred: isPerRs100
+        ? new Prisma.Decimal(data.maturityValue)
+        : new Prisma.Decimal(0),
+      maturityMultiple: isPerRs100 ? new Prisma.Decimal(0) : new Prisma.Decimal(data.maturityValue),
       societyId: actor.societyId,
       createdBy: actor.userId,
     },
@@ -206,7 +225,7 @@ export const createFdAccount = async (
       );
     }
     const initialPaymentAmountDecimal = new Prisma.Decimal(initialPaymentAmount);
-    const maturityAmount = depositAmount.div(100).mul(projectType.maturityAmountPerHundred);
+    const maturityAmount = computeFdMaturityAmount(depositAmount, projectType);
     const maturityDate = calculateMaturityDate(new Date(data.fd.startDate), projectType.duration);
     const linkedMembershipId = data.referrerMembershipId ?? actor.id;
 

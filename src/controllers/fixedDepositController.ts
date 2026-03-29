@@ -18,6 +18,7 @@ import type { Prisma, ServiceStatus } from "@/generated/prisma/client.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 import type { NextFunction, Response } from "express";
 import createHttpError from "http-errors";
+import type { CreateProjectTypeBody } from "@/zodValidationSchema/fixedDepositValidationSchema.js";
 
 const getRequiredParam = (value: string | string[] | undefined, field: string) => {
   if (!value || Array.isArray(value)) {
@@ -33,7 +34,7 @@ export const createFdProjectType = async (
 ) => {
   try {
     const actor = assertMembership(req);
-    const projectType = await createProjectType(actor, req.body as never);
+    const projectType = await createProjectType(actor, req.body as CreateProjectTypeBody);
     res.status(201).json(projectType);
   } catch (error) {
     next(error);
