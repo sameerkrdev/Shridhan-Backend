@@ -1,3 +1,4 @@
+import prisma from "@/config/prisma.js";
 import {
   assertMembership,
   createRdAccount,
@@ -15,6 +16,22 @@ import {
 import type { IAuthorizedRequest } from "@/types/authType.js";
 import type { NextFunction, Response } from "express";
 import createHttpError from "http-errors";
+
+type SkipFinePolicy = "none" | "all" | "selected";
+
+const requiresSkipFinePermission = (policy?: SkipFinePolicy): boolean => {
+  return policy !== undefined && policy !== "none";
+};
+
+const ensureCanSkipFine = async (actor: { roleId: string; societyId: string }) => {
+  const role = await prisma.societyRole.findFirst({
+    where: { id: actor.roleId, societyId: actor.societyId },
+    select: { permissions: true },
+  });
+  if (!role?.permissions.includes("recurring_deposit.pay_skip_fine")) {
+    throw createHttpError(403, "You do not have permission to skip RD fines");
+  }
+};
 
 const getRequiredParam = (value: string | string[] | undefined, field: string) => {
   if (!value || Array.isArray(value)) {
@@ -165,7 +182,15 @@ export const previewPayment = async (
   try {
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
-    const body = req.body as { amount?: number; months?: number[] };
+    const body = req.body as {
+      amount?: number;
+      months?: number[];
+      skipFinePolicy?: SkipFinePolicy;
+      skipFineMonths?: number[];
+    };
+    if (requiresSkipFinePermission(body.skipFinePolicy)) {
+      await ensureCanSkipFine(actor);
+    }
     const preview = await previewRdPayment(actor.societyId, id, body);
     res.json(preview);
   } catch (error) {
@@ -177,6 +202,10 @@ export const pay = async (req: IAuthorizedRequest, res: Response, next: NextFunc
   try {
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
+    const body = req.body as { skipFinePolicy?: SkipFinePolicy };
+    if (requiresSkipFinePermission(body.skipFinePolicy)) {
+      await ensureCanSkipFine(actor);
+    }
     const result = await payRd(actor, id, req.body as never);
     res.status(201).json(result);
   } catch (error) {

@@ -354,25 +354,24 @@ model ServiceDocument {
 }
 
 model MonthlyInterestSchemeProjectType {
-  id                        String                  @id @default(uuid())
-  name                      String
-  minimumAmount             Decimal                 @default(0) @db.Decimal(14, 2)
-  payoutInPercentPerHundred Decimal?                @db.Decimal(14, 2)
-  payoutPerHundred          Decimal?                @db.Decimal(14, 2)
-  monthlyInterestRate       Decimal?                @db.Decimal(14, 2)
-  monthlyInterestPerLakh    Decimal?                @db.Decimal(14, 2)
-  duration                  Int
-  version                   Int                     @default(1)
-  isArchived                Boolean                 @default(false)
-  societyId                 String
-  isDeleted                 Boolean                 @default(false)
-  deletedAt                 DateTime?
-  createdBy                 String
-  updatedBy                 String?
-  createdAt                 DateTime                @default(now())
-  updatedAt                 DateTime                @updatedAt
-  monthlyInterestScheme     MonthlyInterestScheme[]
-  society                   Society                 @relation(fields: [societyId], references: [id])
+  id                             String                  @id @default(uuid())
+  name                           String
+  minimumAmount                  Decimal                 @default(0) @db.Decimal(14, 2)
+  calculationMethod              MisCalculationMethod   @default(MONTHLY_PAYOUT_PER_HUNDRED)
+  monthlyPayoutAmountPerHundred  Decimal?               @db.Decimal(14, 2)
+  annualInterestRate             Decimal?                @db.Decimal(7, 4)
+  duration                       Int
+  version                        Int                     @default(1)
+  isArchived                     Boolean                 @default(false)
+  societyId                      String
+  isDeleted                      Boolean                 @default(false)
+  deletedAt                      DateTime?
+  createdBy                      String
+  updatedBy                      String?
+  createdAt                      DateTime                @default(now())
+  updatedAt                      DateTime                @updatedAt
+  monthlyInterestScheme          MonthlyInterestScheme[]
+  society                        Society                 @relation(fields: [societyId], references: [id])
 
   @@index([societyId])
   @@index([name])
@@ -433,13 +432,11 @@ model RecurringDepositProjectType {
   name                 String
   duration             Int
   minimumMonthlyAmount Decimal            @db.Decimal(14, 2)
-  /// Exactly one of interestRate or maturityPerHundred must be set (enforced in application layer).
-  interestRate         Decimal?           @db.Decimal(14, 2)
-  maturityPerHundred   Decimal?           @db.Decimal(14, 2)
+  maturityPerHundred   Decimal            @db.Decimal(14, 2)
   fineRatePerHundred   Decimal            @db.Decimal(14, 2)
   graceDays            Int                @default(0)
-  penaltyMultiplier    Decimal            @db.Decimal(14, 2)
-  penaltyStartMonth    Int                @default(1)
+  penaltyMultiplier    Decimal?           @db.Decimal(14, 2)
+  penaltyStartMonth    Int?
   version              Int                @default(1)
   isArchived           Boolean            @default(false)
   societyId            String
@@ -461,12 +458,11 @@ model RecurringDeposit {
   monthlyAmount              Decimal                       @db.Decimal(14, 2)
   totalPrincipalExpected     Decimal                       @db.Decimal(14, 2)
   expectedMaturityPayout     Decimal                       @db.Decimal(14, 2)
-  interestRateSnapshot       Decimal?                      @db.Decimal(14, 2)
-  maturityPerHundredSnapshot Decimal?                      @db.Decimal(14, 2)
+  maturityPerHundredSnapshot Decimal                       @db.Decimal(14, 2)
   fineRatePerHundredSnapshot Decimal                       @db.Decimal(14, 2)
   graceDaysSnapshot          Int
-  penaltyMultiplierSnapshot  Decimal                       @db.Decimal(14, 2)
-  penaltyStartMonthSnapshot  Int
+  penaltyMultiplierSnapshot  Decimal?                      @db.Decimal(14, 2)
+  penaltyStartMonthSnapshot  Int?
   startDate                  DateTime
   maturityDate               DateTime
   status                     ServiceStatus
@@ -495,6 +491,7 @@ model RecurringDepositInstallment {
   dueDate            DateTime
   principalAmount    Decimal                             @db.Decimal(14, 2)
   paidPrincipal      Decimal                             @default(0) @db.Decimal(14, 2)
+  deferredFineAccrued Decimal                            @default(0) @db.Decimal(14, 2)
   status             RecurringDepositInstallmentStatus   @default(PENDING)
   isDeleted          Boolean                             @default(false)
   deletedAt          DateTime?
@@ -679,4 +676,9 @@ enum CustomerAccountType {
 enum MaturityCalculationMethod {
   PER_RS_100
   MULTIPLE_OF_PRINCIPAL
+}
+
+enum MisCalculationMethod {
+  MONTHLY_PAYOUT_PER_HUNDRED
+  ANNUAL_INTEREST_RATE
 }

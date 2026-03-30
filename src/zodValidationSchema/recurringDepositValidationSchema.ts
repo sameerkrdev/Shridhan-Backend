@@ -3,6 +3,7 @@ import { z } from "zod";
 const uuidSchema = z.uuid();
 const cuidSchema = z.string().cuid("Invalid member id");
 const paymentMethodSchema = z.enum(["UPI", "CASH", "CHEQUE"]);
+const skipFinePolicySchema = z.enum(["none", "all", "selected"]);
 const emptyStringToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((value) => {
     if (typeof value !== "string") return value;
@@ -36,29 +37,12 @@ export const createRdProjectTypeSchema = z.object({
       name: z.string().trim().min(2, "Name is required").max(120),
       duration: z.number().int().min(1, "Duration must be at least 1 month").max(360),
       minimumMonthlyAmount: z.number().min(1, "Minimum monthly amount must be greater than 0").max(100000000),
-      interestRate: z.number().min(0, "Interest rate cannot be negative").max(100).optional(),
-      maturityPerHundred: z.number().min(0, "Maturity per hundred cannot be negative").max(1000000).optional(),
+      maturityPerHundred: z.number().min(0, "Maturity per hundred cannot be negative").max(1000000),
       fineRatePerHundred: z.number().min(0, "Fine rate cannot be negative").max(1000000),
       graceDays: z.number().int().min(0).max(365),
-      penaltyMultiplier: z.number().min(0, "Penalty multiplier cannot be negative").max(1000),
-      penaltyStartMonth: z.number().int().min(1).max(360),
-    })
-    .refine(
-      (payload) =>
-        payload.interestRate !== undefined || payload.maturityPerHundred !== undefined,
-      {
-        message: "Provide either interestRate or maturityPerHundred",
-        path: ["interestRate"],
-      },
-    )
-    .refine(
-      (payload) =>
-        !(payload.interestRate !== undefined && payload.maturityPerHundred !== undefined),
-      {
-        message: "Provide only one of interestRate or maturityPerHundred",
-        path: ["maturityPerHundred"],
-      },
-    ),
+      penaltyMultiplier: z.number().min(0, "Penalty multiplier cannot be negative").max(1000).optional(),
+      penaltyStartMonth: z.number().int().min(1).max(360).optional(),
+    }),
 });
 
 export const listRdProjectTypesSchema = z.object({
@@ -204,11 +188,25 @@ export const previewRdPaymentSchema = z.object({
     .object({
       amount: z.number().min(0).max(100000000).optional(),
       months: z.array(z.number().int().min(1)).optional(),
+      skipFinePolicy: skipFinePolicySchema.optional(),
+      skipFineMonths: z.array(z.number().int().min(1)).optional(),
     })
-    .refine(
-      (b) => b.amount === undefined || b.amount > 0,
-      { message: "Amount must be greater than 0 when provided", path: ["amount"] },
-    ),
+    .superRefine((payload, ctx) => {
+      if (payload.amount !== undefined && payload.amount <= 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["amount"],
+          message: "Amount must be greater than 0 when provided",
+        });
+      }
+      if (payload.skipFinePolicy === "selected" && (!payload.skipFineMonths || payload.skipFineMonths.length === 0)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["skipFineMonths"],
+          message: "Select at least one month when skipFinePolicy is selected",
+        });
+      }
+    }),
 });
 
 export const payRdSchema = z.object({
@@ -219,6 +217,8 @@ export const payRdSchema = z.object({
     .object({
       amount: z.number().min(1, "Payment amount must be greater than 0").max(100000000),
       months: z.array(z.number().int().min(1)).optional(),
+      skipFinePolicy: skipFinePolicySchema.optional(),
+      skipFineMonths: z.array(z.number().int().min(1)).optional(),
       paymentMethod: paymentMethodSchema.optional(),
       transactionId: emptyStringToUndefined(z.string().max(120)),
       upiId: emptyStringToUndefined(upiIdSchema),
@@ -258,6 +258,13 @@ export const payRdSchema = z.object({
           });
         }
       }
+      if (payload.skipFinePolicy === "selected" && (!payload.skipFineMonths || payload.skipFineMonths.length === 0)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["skipFineMonths"],
+          message: "Select at least one month when skipFinePolicy is selected",
+        });
+      }
     }),
 });
 
@@ -267,6 +274,7 @@ export const withdrawRdSchema = z.object({
   }),
   body: z
     .object({
+      deductDeferredFinesFromMaturity: z.boolean().optional(),
       paymentMethod: paymentMethodSchema.optional(),
       transactionId: emptyStringToUndefined(z.string().max(120)),
       upiId: emptyStringToUndefined(upiIdSchema),

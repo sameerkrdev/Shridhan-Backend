@@ -292,6 +292,13 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     description: "Preview and record installment payments for RD accounts.",
   },
   {
+    key: "recurring_deposit.pay_skip_fine",
+    resource: "recurring_deposit",
+    action: "pay_skip_fine",
+    label: "Skip RD Fine During Payment",
+    description: "Allow deferring installment penalties for maturity-time deduction.",
+  },
+  {
     key: "recurring_deposit.withdraw",
     resource: "recurring_deposit",
     action: "withdraw",

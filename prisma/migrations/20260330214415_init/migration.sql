@@ -37,6 +37,9 @@ CREATE TYPE "PaymentMethod" AS ENUM ('UPI', 'CASH', 'CHEQUE');
 -- CreateEnum
 CREATE TYPE "CustomerAccountType" AS ENUM ('LOAN', 'FIXED_DEPOSIT', 'MONTHLY_INTEREST_SCHEME', 'RECURING_DEPOSIT');
 
+-- CreateEnum
+CREATE TYPE "MaturityCalculationMethod" AS ENUM ('PER_RS_100', 'MULTIPLE_OF_PRINCIPAL');
+
 -- CreateTable
 CREATE TABLE "Society" (
     "id" TEXT NOT NULL,
@@ -248,6 +251,7 @@ CREATE TABLE "FixedDepositProjectType" (
     "minimumAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "maturityMultiple" DECIMAL(14,2) NOT NULL,
     "maturityAmountPerHundred" DECIMAL(14,2) NOT NULL,
+    "maturityCalculationMethod" "MaturityCalculationMethod" NOT NULL DEFAULT 'PER_RS_100',
     "duration" INTEGER NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
@@ -335,10 +339,7 @@ CREATE TABLE "MonthlyInterestSchemeProjectType" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "minimumAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
-    "payoutInPercentPerHundred" DECIMAL(14,2),
-    "payoutPerHundred" DECIMAL(14,2),
-    "monthlyInterestRate" DECIMAL(14,2),
-    "monthlyInterestPerLakh" DECIMAL(14,2),
+    "monthlyPayoutAmountPerThousand" DECIMAL(14,2) NOT NULL,
     "duration" INTEGER NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
@@ -403,12 +404,11 @@ CREATE TABLE "RecurringDepositProjectType" (
     "name" TEXT NOT NULL,
     "duration" INTEGER NOT NULL,
     "minimumMonthlyAmount" DECIMAL(14,2) NOT NULL,
-    "interestRate" DECIMAL(14,2),
-    "maturityPerHundred" DECIMAL(14,2),
+    "maturityPerHundred" DECIMAL(14,2) NOT NULL,
     "fineRatePerHundred" DECIMAL(14,2) NOT NULL,
     "graceDays" INTEGER NOT NULL DEFAULT 0,
-    "penaltyMultiplier" DECIMAL(14,2) NOT NULL,
-    "penaltyStartMonth" INTEGER NOT NULL DEFAULT 1,
+    "penaltyMultiplier" DECIMAL(14,2),
+    "penaltyStartMonth" INTEGER,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
     "societyId" TEXT NOT NULL,
@@ -428,12 +428,11 @@ CREATE TABLE "RecurringDeposit" (
     "monthlyAmount" DECIMAL(14,2) NOT NULL,
     "totalPrincipalExpected" DECIMAL(14,2) NOT NULL,
     "expectedMaturityPayout" DECIMAL(14,2) NOT NULL,
-    "interestRateSnapshot" DECIMAL(14,2),
-    "maturityPerHundredSnapshot" DECIMAL(14,2),
+    "maturityPerHundredSnapshot" DECIMAL(14,2) NOT NULL,
     "fineRatePerHundredSnapshot" DECIMAL(14,2) NOT NULL,
     "graceDaysSnapshot" INTEGER NOT NULL,
-    "penaltyMultiplierSnapshot" DECIMAL(14,2) NOT NULL,
-    "penaltyStartMonthSnapshot" INTEGER NOT NULL,
+    "penaltyMultiplierSnapshot" DECIMAL(14,2),
+    "penaltyStartMonthSnapshot" INTEGER,
     "startDate" TIMESTAMP(3) NOT NULL,
     "maturityDate" TIMESTAMP(3) NOT NULL,
     "status" "ServiceStatus" NOT NULL,
@@ -457,6 +456,7 @@ CREATE TABLE "RecurringDepositInstallment" (
     "dueDate" TIMESTAMP(3) NOT NULL,
     "principalAmount" DECIMAL(14,2) NOT NULL,
     "paidPrincipal" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "deferredFineAccrued" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "status" "RecurringDepositInstallmentStatus" NOT NULL DEFAULT 'PENDING',
     "isDeleted" BOOLEAN NOT NULL DEFAULT false,
     "deletedAt" TIMESTAMP(3),

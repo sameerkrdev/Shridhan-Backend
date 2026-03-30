@@ -165,6 +165,20 @@ export interface FifoAllocation {
   fineApplied: Prisma.Decimal;
 }
 
+export interface FifoDeferredFineDelta {
+  installmentId: string;
+  monthIndex: number;
+  deferredFineDelta: Prisma.Decimal;
+}
+
+function getOrderedDueLines(lines: DueLine[], monthFilter?: number[]): DueLine[] {
+  const allowed = monthFilter ? new Set(monthFilter) : null;
+  return [...lines]
+    .filter((l) => l.totalDue.gt(0))
+    .filter((l) => (allowed ? allowed.has(l.monthIndex) : true))
+    .sort((a, b) => a.monthIndex - b.monthIndex);
+}
+
 /**
  * FIFO across installments (by monthIndex). Within each installment: principal first, then fine.
  * Only lines with totalDue > 0 are considered; optionally restrict to monthIndices.
@@ -174,11 +188,7 @@ export function fifoAllocatePayment(
   paymentAmount: Prisma.Decimal,
   monthFilter?: number[],
 ): { allocations: FifoAllocation[]; unallocated: Prisma.Decimal } {
-  const allowed = new Set(monthFilter);
-  const ordered = [...lines]
-    .filter((l) => l.totalDue.gt(0))
-    .filter((l) => (monthFilter === undefined ? true : allowed.has(l.monthIndex)))
-    .sort((a, b) => a.monthIndex - b.monthIndex);
+  const ordered = getOrderedDueLines(lines, monthFilter);
 
   let remaining = paymentAmount;
   const allocations: FifoAllocation[] = [];
@@ -206,6 +216,70 @@ export function fifoAllocatePayment(
   }
 
   return { allocations, unallocated: remaining };
+}
+
+export function sumMaxAllocatable(
+  lines: DueLine[],
+  monthFilter?: number[],
+  skipFineMonthIndices?: Set<number>,
+): Prisma.Decimal {
+  const skipSet = skipFineMonthIndices ?? new Set<number>();
+  return getOrderedDueLines(lines, monthFilter).reduce((sum, line) => {
+    if (skipSet.has(line.monthIndex)) {
+      return sum.add(line.remainingPrincipal);
+    }
+    return sum.add(line.totalDue);
+  }, new Prisma.Decimal(0));
+}
+
+export function fifoAllocatePaymentWithFineSkip(
+  lines: DueLine[],
+  paymentAmount: Prisma.Decimal,
+  monthFilter?: number[],
+  skipFineMonthIndices?: Set<number>,
+): {
+  allocations: FifoAllocation[];
+  deferredFineDeltas: FifoDeferredFineDelta[];
+  unallocated: Prisma.Decimal;
+} {
+  const skipSet = skipFineMonthIndices ?? new Set<number>();
+  const ordered = getOrderedDueLines(lines, monthFilter);
+  let remaining = paymentAmount;
+  const allocations: FifoAllocation[] = [];
+  const deferredFineDeltas: FifoDeferredFineDelta[] = [];
+
+  for (const line of ordered) {
+    if (remaining.lte(0)) break;
+
+    const skipFine = skipSet.has(line.monthIndex);
+    const pApply = remaining.lt(line.remainingPrincipal) ? remaining : line.remainingPrincipal;
+    remaining = remaining.sub(pApply);
+
+    let fApply = new Prisma.Decimal(0);
+    if (!skipFine && remaining.gt(0) && line.fine.gt(0)) {
+      fApply = remaining.lt(line.fine) ? remaining : line.fine;
+      remaining = remaining.sub(fApply);
+    }
+
+    if (pApply.gt(0) || fApply.gt(0)) {
+      allocations.push({
+        installmentId: line.installmentId,
+        monthIndex: line.monthIndex,
+        principalApplied: pApply,
+        fineApplied: fApply,
+      });
+    }
+
+    if (skipFine && pApply.gte(line.remainingPrincipal) && line.fine.gt(0)) {
+      deferredFineDeltas.push({
+        installmentId: line.installmentId,
+        monthIndex: line.monthIndex,
+        deferredFineDelta: line.fine,
+      });
+    }
+  }
+
+  return { allocations, deferredFineDeltas, unallocated: remaining };
 }
 
 export function sumTotalDue(lines: DueLine[], monthFilter?: number[]): Prisma.Decimal {

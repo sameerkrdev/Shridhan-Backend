@@ -36,36 +36,39 @@ export const createMisProjectTypeSchema = z.object({
       name: z.string().trim().min(2, "Name is required").max(120),
       duration: z.number().int().min(1, "Duration must be at least 1 month").max(360),
       minimumAmount: z.number().min(1, "Minimum amount must be greater than 0").max(100000000),
-      monthlyInterestRate: z
+      calculationMethod: z.enum(["MONTHLY_PAYOUT_PER_HUNDRED", "ANNUAL_INTEREST_RATE"]),
+      monthlyPayoutAmountPerHundred: z
         .number()
-        .min(0, "Monthly interest rate cannot be negative")
-        .max(100)
-        .optional(),
-      monthlyInterestPerLakh: z
-        .number()
-        .min(0, "Monthly interest per thousand cannot be negative")
+        .min(0, "Monthly payout amount per hundred cannot be negative")
         .max(1000000)
+        .optional(),
+      annualInterestRate: z
+        .number()
+        .min(0, "Annual interest rate cannot be negative")
+        .max(100, "Annual interest rate cannot exceed 100")
         .optional(),
       rules: z.string().trim().max(5000).optional(),
     })
-    .refine(
-      (payload) =>
-        payload.monthlyInterestRate !== undefined || payload.monthlyInterestPerLakh !== undefined,
-      {
-        message: "Provide either monthlyInterestRate or monthlyInterestPerLakh",
-        path: ["monthlyInterestRate"],
-      },
-    )
-    .refine(
-      (payload) =>
-        !(
-          payload.monthlyInterestRate !== undefined && payload.monthlyInterestPerLakh !== undefined
-        ),
-      {
-        message: "Provide only one of monthlyInterestRate or monthlyInterestPerLakh",
-        path: ["monthlyInterestPerLakh"],
-      },
-    ),
+    .superRefine((payload, ctx) => {
+      if (payload.calculationMethod === "MONTHLY_PAYOUT_PER_HUNDRED") {
+        if (payload.monthlyPayoutAmountPerHundred === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["monthlyPayoutAmountPerHundred"],
+            message: "Monthly payout amount per hundred is required for this calculation method",
+          });
+        }
+        return;
+      }
+
+      if (payload.annualInterestRate === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["annualInterestRate"],
+          message: "Annual interest rate is required for this calculation method",
+        });
+      }
+    }),
 });
 
 export const listMisProjectTypesSchema = z.object({

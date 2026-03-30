@@ -2,6 +2,7 @@ import prisma from "@/config/prisma.js";
 import {
   Prisma,
   CustomerAccountType,
+  MisCalculationMethod,
   type PaymentMethod,
   ServiceStatus,
   ServiceType,
@@ -18,8 +19,9 @@ interface CreateMisProjectTypeInput {
   name: string;
   duration: number;
   minimumAmount: number;
-  monthlyInterestRate?: number;
-  monthlyInterestPerLakh?: number;
+  calculationMethod: MisCalculationMethod;
+  monthlyPayoutAmountPerHundred?: number;
+  annualInterestRate?: number;
   rules?: string;
 }
 
@@ -86,25 +88,25 @@ const calculateMaturityDate = (startDate: Date, durationInMonths: number) => {
 const calculateMonthlyInterest = (
   depositAmount: Prisma.Decimal,
   projectType: {
-    monthlyInterestPerLakh: Prisma.Decimal | null;
-    monthlyInterestRate: Prisma.Decimal | null;
-    payoutPerHundred: Prisma.Decimal | null;
-    payoutInPercentPerHundred: Prisma.Decimal | null;
+    calculationMethod: MisCalculationMethod;
+    monthlyPayoutAmountPerHundred: Prisma.Decimal | null;
+    annualInterestRate: Prisma.Decimal | null;
   },
 ) => {
-  if (projectType.monthlyInterestPerLakh) {
-    return depositAmount.div(1000).mul(projectType.monthlyInterestPerLakh);
+  if (projectType.calculationMethod === MisCalculationMethod.ANNUAL_INTEREST_RATE) {
+    if (projectType.annualInterestRate === null) {
+      throw createHttpError(500, "MIS project type configuration is invalid: annualInterestRate is missing");
+    }
+    return depositAmount.mul(projectType.annualInterestRate).div(100).div(12);
   }
-  if (projectType.monthlyInterestRate) {
-    return depositAmount.mul(projectType.monthlyInterestRate).div(100);
+
+  if (projectType.monthlyPayoutAmountPerHundred === null) {
+    throw createHttpError(
+      500,
+      "MIS project type configuration is invalid: monthlyPayoutAmountPerHundred is missing",
+    );
   }
-  if (projectType.payoutPerHundred) {
-    return depositAmount.div(100).mul(projectType.payoutPerHundred);
-  }
-  if (projectType.payoutInPercentPerHundred) {
-    return depositAmount.mul(projectType.payoutInPercentPerHundred).div(100);
-  }
-  throw createHttpError(400, "Project type is missing monthly interest configuration");
+  return depositAmount.div(100).mul(projectType.monthlyPayoutAmountPerHundred);
 };
 
 const sumAmount = (
@@ -118,39 +120,37 @@ export const createMisProjectType = async (
   data: CreateMisProjectTypeInput,
 ) => {
   if (
-    (data.monthlyInterestRate === undefined && data.monthlyInterestPerLakh === undefined) ||
-    (data.monthlyInterestRate !== undefined && data.monthlyInterestPerLakh !== undefined)
+    data.calculationMethod === MisCalculationMethod.MONTHLY_PAYOUT_PER_HUNDRED &&
+    data.monthlyPayoutAmountPerHundred === undefined
   ) {
-    throw createHttpError(
-      400,
-      "Provide exactly one of monthlyInterestRate or monthlyInterestPerLakh",
-    );
+    throw createHttpError(400, "monthlyPayoutAmountPerHundred is required for selected calculation method");
   }
+  if (
+    data.calculationMethod === MisCalculationMethod.ANNUAL_INTEREST_RATE &&
+    data.annualInterestRate === undefined
+  ) {
+    throw createHttpError(400, "annualInterestRate is required for selected calculation method");
+  }
+
+  const monthlyPayoutAmountPerHundred =
+    data.calculationMethod === MisCalculationMethod.MONTHLY_PAYOUT_PER_HUNDRED
+      ? new Prisma.Decimal(data.monthlyPayoutAmountPerHundred ?? 0)
+      : null;
+  const annualInterestRate =
+    data.calculationMethod === MisCalculationMethod.ANNUAL_INTEREST_RATE
+      ? new Prisma.Decimal(data.annualInterestRate ?? 0)
+      : null;
 
   return prisma.monthlyInterestSchemeProjectType.create({
     data: {
       name: data.name,
       duration: data.duration,
       minimumAmount: new Prisma.Decimal(data.minimumAmount),
-      monthlyInterestRate:
-        data.monthlyInterestRate !== undefined
-          ? new Prisma.Decimal(data.monthlyInterestRate)
-          : null,
-      monthlyInterestPerLakh:
-        data.monthlyInterestPerLakh !== undefined
-          ? new Prisma.Decimal(data.monthlyInterestPerLakh)
-          : null,
+      calculationMethod: data.calculationMethod,
+      monthlyPayoutAmountPerHundred,
+      annualInterestRate,
       societyId: actor.societyId,
       createdBy: actor.userId,
-      // Keep backward compatibility columns populated where possible.
-      payoutInPercentPerHundred:
-        data.monthlyInterestRate !== undefined
-          ? new Prisma.Decimal(data.monthlyInterestRate)
-          : null,
-      payoutPerHundred:
-        data.monthlyInterestPerLakh !== undefined
-          ? new Prisma.Decimal(data.monthlyInterestPerLakh).div(10)
-          : null,
       updatedBy: data.rules ? actor.userId : null,
     },
   });

@@ -6,14 +6,15 @@ import {
   RecurringDepositTransactionType,
   type PaymentMethod,
   ServiceStatus,
-  type PrismaClient,
   type RecurringDepositInstallment,
 } from "@/generated/prisma/client.js";
 import createHttpError from "http-errors";
 import {
   computeDueLines,
   fifoAllocatePayment,
+  fifoAllocatePaymentWithFineSkip,
   isOverdue,
+  sumMaxAllocatable,
   sumTotalDue,
   type InstallmentInput,
   type RdDueParams,
@@ -23,12 +24,11 @@ interface CreateRdProjectTypeInput {
   name: string;
   duration: number;
   minimumMonthlyAmount: number;
-  interestRate?: number;
-  maturityPerHundred?: number;
+  maturityPerHundred: number;
   fineRatePerHundred: number;
   graceDays: number;
-  penaltyMultiplier: number;
-  penaltyStartMonth: number;
+  penaltyMultiplier?: number;
+  penaltyStartMonth?: number;
 }
 
 interface CreateRdAccountInput {
@@ -72,8 +72,12 @@ interface PaymentMetaInput {
   bankName?: string;
 }
 
-/** Interactive transaction client (Prisma `$transaction` callback parameter). */
-type DbTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
+type SkipFinePolicy = "none" | "all" | "selected";
+
+interface SkipFineInput {
+  skipFinePolicy?: SkipFinePolicy;
+  skipFineMonths?: number[];
+}
 
 const assertMembership = (req: { membership?: Prisma.MembershipModel }) => {
   if (!req.membership) {
@@ -93,44 +97,37 @@ export function addMonths(d: Date, months: number): Date {
 export function computeExpectedMaturityPayout(
   monthlyAmount: Prisma.Decimal,
   duration: number,
-  interestRate: Prisma.Decimal | null,
-  maturityPerHundred: Prisma.Decimal | null,
+  maturityPerHundred: Prisma.Decimal,
 ): Prisma.Decimal {
   const totalPrincipal = monthlyAmount.mul(duration);
-  if (maturityPerHundred) {
-    const interest = totalPrincipal.mul(maturityPerHundred).div(100);
-    return totalPrincipal.add(interest);
-  }
-  if (interestRate) {
-    return totalPrincipal.add(totalPrincipal.mul(interestRate).div(100));
-  }
-  throw createHttpError(400, "Project type must define interest via interestRate or maturityPerHundred");
+  const interest = totalPrincipal.mul(maturityPerHundred).div(100);
+  return totalPrincipal.add(interest);
 }
 
 function rdDueParamsFromAccount(account: {
   monthlyAmount: Prisma.Decimal;
   fineRatePerHundredSnapshot: Prisma.Decimal;
   graceDaysSnapshot: number;
-  penaltyMultiplierSnapshot: Prisma.Decimal;
-  penaltyStartMonthSnapshot: number;
+  penaltyMultiplierSnapshot: Prisma.Decimal | null;
+  penaltyStartMonthSnapshot: number | null;
 }): RdDueParams {
   return {
     monthlyAmount: account.monthlyAmount,
     fineRatePerHundred: account.fineRatePerHundredSnapshot,
     graceDays: account.graceDaysSnapshot,
-    penaltyMultiplier: account.penaltyMultiplierSnapshot,
-    penaltyStartMonth: account.penaltyStartMonthSnapshot,
+    penaltyMultiplier: account.penaltyMultiplierSnapshot ?? new Prisma.Decimal(1),
+    penaltyStartMonth: account.penaltyStartMonthSnapshot ?? 1,
   };
 }
 
 function toInstallmentInputs(
-  rows: Array<{
+  rows: {
     id: string;
     monthIndex: number;
     dueDate: Date;
     principalAmount: Prisma.Decimal;
     paidPrincipal: Prisma.Decimal;
-  }>,
+  }[],
 ): InstallmentInput[] {
   return rows.map((r) => ({
     id: r.id,
@@ -155,32 +152,77 @@ function deriveInstallmentStatus(
   return RecurringDepositInstallmentStatus.PENDING;
 }
 
+function validateMonthFilter(
+  monthFilter: number[] | undefined,
+  installments: RecurringDepositInstallment[],
+): number[] | undefined {
+  if (!monthFilter?.length) return undefined;
+  const valid = new Set(installments.map((i) => i.monthIndex));
+  for (const m of monthFilter) {
+    if (!valid.has(m)) {
+      throw createHttpError(400, `Invalid month index: ${m}`);
+    }
+  }
+  return monthFilter;
+}
+
+function resolveSkipFineMonthIndices(
+  policy: SkipFinePolicy,
+  monthFilter: number[] | undefined,
+  skipFineMonths: number[] | undefined,
+  lines: { monthIndex: number; totalDue: Prisma.Decimal }[],
+  installments: RecurringDepositInstallment[],
+): Set<number> {
+  if (policy === "none") {
+    return new Set<number>();
+  }
+
+  const validMonths = new Set(installments.map((i) => i.monthIndex));
+  const inScopeMonths = new Set(monthFilter ?? installments.map((i) => i.monthIndex));
+
+  if (policy === "all") {
+    return new Set(
+      lines
+        .filter((line) => line.totalDue.gt(0))
+        .filter((line) => inScopeMonths.has(line.monthIndex))
+        .map((line) => line.monthIndex),
+    );
+  }
+
+  if (!skipFineMonths?.length) {
+    throw createHttpError(400, "skipFineMonths is required when skipFinePolicy is selected");
+  }
+
+  const result = new Set<number>();
+  for (const m of skipFineMonths) {
+    if (!validMonths.has(m)) {
+      throw createHttpError(400, `Invalid skip fine month index: ${m}`);
+    }
+    if (!inScopeMonths.has(m)) {
+      throw createHttpError(400, `Skip fine month ${m} is outside selected payment scope`);
+    }
+    result.add(m);
+  }
+  return result;
+}
+
 export const createRdProjectType = async (
   actor: Prisma.MembershipModel,
   data: CreateRdProjectTypeInput,
 ) => {
-  if (
-    (data.interestRate === undefined && data.maturityPerHundred === undefined) ||
-    (data.interestRate !== undefined && data.maturityPerHundred !== undefined)
-  ) {
-    throw createHttpError(400, "Provide exactly one of interestRate or maturityPerHundred");
-  }
-
   return prisma.recurringDepositProjectType.create({
     data: {
       name: data.name,
       duration: data.duration,
       minimumMonthlyAmount: new Prisma.Decimal(data.minimumMonthlyAmount),
-      interestRate:
-        data.interestRate !== undefined ? new Prisma.Decimal(data.interestRate) : null,
-      maturityPerHundred:
-        data.maturityPerHundred !== undefined
-          ? new Prisma.Decimal(data.maturityPerHundred)
-          : null,
+      maturityPerHundred: new Prisma.Decimal(data.maturityPerHundred),
       fineRatePerHundred: new Prisma.Decimal(data.fineRatePerHundred),
       graceDays: data.graceDays,
-      penaltyMultiplier: new Prisma.Decimal(data.penaltyMultiplier),
-      penaltyStartMonth: data.penaltyStartMonth,
+      penaltyMultiplier:
+        data.penaltyMultiplier !== undefined
+          ? new Prisma.Decimal(data.penaltyMultiplier)
+          : null,
+      penaltyStartMonth: data.penaltyStartMonth ?? null,
       societyId: actor.societyId,
       createdBy: actor.userId,
     },
@@ -243,7 +285,7 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
     throw createHttpError(400, "Initial payment amount cannot be negative");
   }
 
-  return prisma.$transaction(async (tx: DbTx) => {
+  return prisma.$transaction(async (tx) => {
     const projectType = await tx.recurringDepositProjectType.findFirst({
       where: {
         id: data.rd.projectTypeId,
@@ -255,13 +297,6 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
 
     if (!projectType) {
       throw createHttpError(404, "RD project type not found for this society");
-    }
-
-    if (
-      (projectType.interestRate === null && projectType.maturityPerHundred === null) ||
-      (projectType.interestRate !== null && projectType.maturityPerHundred !== null)
-    ) {
-      throw createHttpError(400, "RD project type is misconfigured: interest fields");
     }
 
     const linkedMembershipId = data.referrerMembershipId ?? actor.id;
@@ -326,7 +361,6 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
     const expectedMaturityPayout = computeExpectedMaturityPayout(
       monthlyAmount,
       projectType.duration,
-      projectType.interestRate,
       projectType.maturityPerHundred,
     );
 
@@ -335,7 +369,6 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
         monthlyAmount,
         totalPrincipalExpected,
         expectedMaturityPayout,
-        interestRateSnapshot: projectType.interestRate,
         maturityPerHundredSnapshot: projectType.maturityPerHundred,
         fineRatePerHundredSnapshot: projectType.fineRatePerHundred,
         graceDaysSnapshot: projectType.graceDays,
@@ -622,7 +655,14 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
         include: { allocations: true },
       },
     },
-  });
+  }) as Prisma.RecurringDepositGetPayload<{
+    include: {
+      customer: { include: { nominees: true } };
+      projectType: true;
+      installments: true;
+      transactions: { include: { allocations: true } };
+    };
+  }> | null;
 
   if (!rd) {
     throw createHttpError(404, "RD account not found");
@@ -634,6 +674,14 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
   const totalOutstanding = sumTotalDue(lines);
 
   const lineById = new Map(lines.map((l) => [l.installmentId, l]));
+  const totalDeferredFines = rd.installments.reduce(
+    (sum, inst) => sum.add(inst.deferredFineAccrued),
+    new Prisma.Decimal(0),
+  );
+  const netMaturityPayoutAfterDeferredFines = Prisma.Decimal.max(
+    rd.expectedMaturityPayout.sub(totalDeferredFines),
+    new Prisma.Decimal(0),
+  );
   const installmentsWithDue = rd.installments.map((inst: RecurringDepositInstallment) => {
     const line = lineById.get(inst.id);
     return {
@@ -641,6 +689,7 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
       remainingPrincipal: line?.remainingPrincipal.toString() ?? "0",
       fine: line?.fine.toString() ?? "0",
       totalDue: line?.totalDue.toString() ?? "0",
+      deferredFineAccrued: inst.deferredFineAccrued.toString(),
       computedStatus: line?.status ?? inst.status,
     };
   });
@@ -651,6 +700,9 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
     summary: {
       totalOutstanding: totalOutstanding.toString(),
       expectedMaturityPayout: rd.expectedMaturityPayout.toString(),
+      grossMaturityPayout: rd.expectedMaturityPayout.toString(),
+      totalDeferredFines: totalDeferredFines.toString(),
+      netMaturityPayoutAfterDeferredFines: netMaturityPayoutAfterDeferredFines.toString(),
       totalPrincipalExpected: rd.totalPrincipalExpected.toString(),
     },
   };
@@ -659,7 +711,7 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
 export const previewRdPayment = async (
   societyId: string,
   rdId: string,
-  input: { amount?: number; months?: number[] },
+  input: { amount?: number; months?: number[] } & SkipFineInput,
 ) => {
   const rd = await prisma.recurringDeposit.findFirst({
     where: {
@@ -673,7 +725,9 @@ export const previewRdPayment = async (
         orderBy: { monthIndex: "asc" },
       },
     },
-  });
+  }) as Prisma.RecurringDepositGetPayload<{
+    include: { installments: true };
+  }> | null;
 
   if (!rd) {
     throw createHttpError(404, "RD account not found");
@@ -683,19 +737,18 @@ export const previewRdPayment = async (
   const params = rdDueParamsFromAccount(rd);
   const lines = computeDueLines(toInstallmentInputs(rd.installments), params, now);
 
-  const monthFilter = input.months;
-  if (monthFilter?.length) {
-    const valid = new Set(
-      rd.installments.map((i: RecurringDepositInstallment) => i.monthIndex),
-    );
-    for (const m of monthFilter) {
-      if (!valid.has(m)) {
-        throw createHttpError(400, `Invalid month index: ${m}`);
-      }
-    }
-  }
-
-  const maxDue = sumTotalDue(lines, monthFilter);
+  const monthFilter = validateMonthFilter(input.months, rd.installments);
+  const skipFinePolicy = input.skipFinePolicy ?? "none";
+  const skipFineMonthIndices = resolveSkipFineMonthIndices(
+    skipFinePolicy,
+    monthFilter,
+    input.skipFineMonths,
+    lines,
+    rd.installments,
+  );
+  const maxDue = skipFinePolicy === "none"
+    ? sumTotalDue(lines, monthFilter)
+    : sumMaxAllocatable(lines, monthFilter, skipFineMonthIndices);
   let amountDecimal: Prisma.Decimal;
   if (input.amount !== undefined) {
     amountDecimal = new Prisma.Decimal(input.amount);
@@ -709,7 +762,21 @@ export const previewRdPayment = async (
     amountDecimal = new Prisma.Decimal(0);
   }
 
-  const { allocations, unallocated } = fifoAllocatePayment(lines, amountDecimal, monthFilter);
+  const allocationResult = skipFinePolicy === "none"
+    ? (() => {
+      const standard = fifoAllocatePayment(lines, amountDecimal, monthFilter);
+      return {
+        allocations: standard.allocations,
+        unallocated: standard.unallocated,
+        deferredFineDeltas: [] as {
+          installmentId: string;
+          monthIndex: number;
+          deferredFineDelta: Prisma.Decimal;
+        }[],
+      };
+    })()
+    : fifoAllocatePaymentWithFineSkip(lines, amountDecimal, monthFilter, skipFineMonthIndices);
+  const { allocations, unallocated, deferredFineDeltas } = allocationResult;
 
   return {
     maxDue: maxDue.toString(),
@@ -720,7 +787,14 @@ export const previewRdPayment = async (
       principalApplied: a.principalApplied.toString(),
       fineApplied: a.fineApplied.toString(),
     })),
+    deferredFineDeltas: deferredFineDeltas.map((d) => ({
+      installmentId: d.installmentId,
+      monthIndex: d.monthIndex,
+      deferredFineDelta: d.deferredFineDelta.toString(),
+    })),
     unallocated: unallocated.toString(),
+    skipFinePolicy,
+    skipFineMonths: Array.from(skipFineMonthIndices),
     lines: lines.map((l) => ({
       installmentId: l.installmentId,
       monthIndex: l.monthIndex,
@@ -736,13 +810,13 @@ export const previewRdPayment = async (
 export const payRd = async (
   actor: Prisma.MembershipModel,
   rdId: string,
-  data: { amount: number; months?: number[] } & PaymentMetaInput,
+  data: { amount: number; months?: number[] } & PaymentMetaInput & SkipFineInput,
 ) => {
   if (data.amount <= 0) {
     throw createHttpError(400, "Payment amount must be greater than 0");
   }
 
-  return prisma.$transaction(async (tx: DbTx) => {
+  return prisma.$transaction(async (tx) => {
     const rd = await tx.recurringDeposit.findFirst({
       where: {
         id: rdId,
@@ -755,7 +829,9 @@ export const payRd = async (
           orderBy: { monthIndex: "asc" },
         },
       },
-    });
+    }) as Prisma.RecurringDepositGetPayload<{
+      include: { installments: true };
+    }> | null;
 
     if (!rd) {
       throw createHttpError(404, "RD account not found");
@@ -769,25 +845,38 @@ export const payRd = async (
     const params = rdDueParamsFromAccount(rd);
     const lines = computeDueLines(toInstallmentInputs(rd.installments), params, now);
 
-    const monthFilter = data.months;
-    if (monthFilter?.length) {
-      const valid = new Set(
-        rd.installments.map((i: RecurringDepositInstallment) => i.monthIndex),
-      );
-      for (const m of monthFilter) {
-        if (!valid.has(m)) {
-          throw createHttpError(400, `Invalid month index: ${m}`);
-        }
-      }
-    }
-
-    const maxDue = sumTotalDue(lines, monthFilter);
+    const monthFilter = validateMonthFilter(data.months, rd.installments);
+    const skipFinePolicy = data.skipFinePolicy ?? "none";
+    const skipFineMonthIndices = resolveSkipFineMonthIndices(
+      skipFinePolicy,
+      monthFilter,
+      data.skipFineMonths,
+      lines,
+      rd.installments,
+    );
+    const maxDue = skipFinePolicy === "none"
+      ? sumTotalDue(lines, monthFilter)
+      : sumMaxAllocatable(lines, monthFilter, skipFineMonthIndices);
     const payAmount = new Prisma.Decimal(data.amount);
     if (payAmount.gt(maxDue)) {
       throw createHttpError(400, "Payment exceeds total due");
     }
 
-    const { allocations, unallocated } = fifoAllocatePayment(lines, payAmount, monthFilter);
+    const allocationResult = skipFinePolicy === "none"
+      ? (() => {
+        const standard = fifoAllocatePayment(lines, payAmount, monthFilter);
+        return {
+          allocations: standard.allocations,
+          unallocated: standard.unallocated,
+          deferredFineDeltas: [] as {
+            installmentId: string;
+            monthIndex: number;
+            deferredFineDelta: Prisma.Decimal;
+          }[],
+        };
+      })()
+      : fifoAllocatePaymentWithFineSkip(lines, payAmount, monthFilter, skipFineMonthIndices);
+    const { allocations, unallocated, deferredFineDeltas } = allocationResult;
     if (unallocated.gt(0)) {
       throw createHttpError(400, "Could not allocate payment");
     }
@@ -817,6 +906,10 @@ export const payRd = async (
       },
     });
 
+    const deferredMap = new Map(
+      deferredFineDeltas.map((d) => [d.installmentId, d.deferredFineDelta]),
+    );
+
     for (const alloc of allocations) {
       await tx.recurringDepositPaymentAllocation.create({
         data: {
@@ -830,10 +923,12 @@ export const payRd = async (
       const inst = rd.installments.find((r: RecurringDepositInstallment) => r.id === alloc.installmentId);
       if (!inst) continue;
       const newPaid = inst.paidPrincipal.add(alloc.principalApplied);
+      const deferredDelta = deferredMap.get(alloc.installmentId) ?? new Prisma.Decimal(0);
       await tx.recurringDepositInstallment.update({
         where: { id: alloc.installmentId },
         data: {
           paidPrincipal: newPaid,
+          deferredFineAccrued: inst.deferredFineAccrued.add(deferredDelta),
           status: deriveInstallmentStatus(
             inst.principalAmount,
             newPaid,
@@ -865,8 +960,12 @@ export const payRd = async (
   });
 };
 
-export const withdrawRd = async (actor: Prisma.MembershipModel, rdId: string, data: PaymentMetaInput) => {
-  return prisma.$transaction(async (tx: DbTx) => {
+export const withdrawRd = async (
+  actor: Prisma.MembershipModel,
+  rdId: string,
+  data: PaymentMetaInput & { deductDeferredFinesFromMaturity?: boolean },
+) => {
+  return prisma.$transaction(async (tx) => {
     const rd = await tx.recurringDeposit.findFirst({
       where: {
         id: rdId,
@@ -879,7 +978,9 @@ export const withdrawRd = async (actor: Prisma.MembershipModel, rdId: string, da
           orderBy: { monthIndex: "asc" },
         },
       },
-    });
+    }) as Prisma.RecurringDepositGetPayload<{
+      include: { installments: true };
+    }> | null;
 
     if (!rd) {
       throw createHttpError(404, "RD account not found");
@@ -901,14 +1002,33 @@ export const withdrawRd = async (actor: Prisma.MembershipModel, rdId: string, da
       throw createHttpError(400, "RD account is already closed");
     }
 
-    const payout = rd.expectedMaturityPayout;
+    const totalDeferredFines = rd.installments.reduce(
+      (sum, inst) => sum.add(inst.deferredFineAccrued),
+      new Prisma.Decimal(0),
+    );
+    const shouldDeductDeferredFines =
+      totalDeferredFines.gt(0) && data.deductDeferredFinesFromMaturity === true;
+    if (totalDeferredFines.gt(0) && !shouldDeductDeferredFines) {
+      throw createHttpError(
+        400,
+        "Deferred fines are pending. Enable maturity deduction to settle and withdraw.",
+      );
+    }
+
+    const payout = shouldDeductDeferredFines
+      ? rd.expectedMaturityPayout.sub(totalDeferredFines)
+      : rd.expectedMaturityPayout;
+    if (payout.lt(0)) {
+      throw createHttpError(400, "Deferred fines exceed maturity payout");
+    }
 
     await tx.recurringDepositTransaction.create({
       data: {
         recurringDepositId: rd.id,
         amount: payout,
         principalAmount: rd.totalPrincipalExpected,
-        fineAmount: new Prisma.Decimal(0),
+        // Fine amount on PAYOUT stores deferred fine settlement done at maturity.
+        fineAmount: shouldDeductDeferredFines ? totalDeferredFines : new Prisma.Decimal(0),
         type: RecurringDepositTransactionType.PAYOUT,
         paymentMethod: data.paymentMethod ?? null,
         transactionId: data.transactionId ?? null,
