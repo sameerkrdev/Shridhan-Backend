@@ -38,10 +38,29 @@ export const createRdProjectTypeSchema = z.object({
       duration: z.number().int().min(1, "Duration must be at least 1 month").max(360),
       minimumMonthlyAmount: z.number().min(1, "Minimum monthly amount must be greater than 0").max(100000000),
       maturityPerHundred: z.number().min(0, "Maturity per hundred cannot be negative").max(1000000),
-      fineRatePerHundred: z.number().min(0, "Fine rate cannot be negative").max(1000000),
+      fineCalculationMethod: z.enum(["FIXED_PER_STREAK_UNIT", "PROPORTIONAL_PER_HUNDRED"]),
+      fixedOverdueFineAmount: z.number().min(0).max(100000000).optional(),
+      fineRatePerHundred: z.number().min(0, "Fine rate cannot be negative").max(1000000).optional(),
       graceDays: z.number().int().min(0).max(365),
       penaltyMultiplier: z.number().min(0, "Penalty multiplier cannot be negative").max(1000).optional(),
       penaltyStartMonth: z.number().int().min(1).max(360).optional(),
+    })
+    .superRefine((payload, ctx) => {
+      if (payload.fineCalculationMethod === "FIXED_PER_STREAK_UNIT") {
+        if (payload.fixedOverdueFineAmount === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["fixedOverdueFineAmount"],
+            message: "Fixed overdue fine amount is required for fixed fee mode",
+          });
+        }
+      } else if (payload.fineRatePerHundred === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["fineRatePerHundred"],
+          message: "Fine rate per hundred is required for proportional fee mode",
+        });
+      }
     }),
 });
 

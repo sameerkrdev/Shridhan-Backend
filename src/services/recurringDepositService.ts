@@ -2,6 +2,7 @@ import prisma from "@/config/prisma.js";
 import {
   CustomerAccountType,
   Prisma,
+  RdFineCalculationMethod,
   RecurringDepositInstallmentStatus,
   RecurringDepositTransactionType,
   type PaymentMethod,
@@ -25,6 +26,8 @@ interface CreateRdProjectTypeInput {
   duration: number;
   minimumMonthlyAmount: number;
   maturityPerHundred: number;
+  fineCalculationMethod: RdFineCalculationMethod;
+  fixedOverdueFineAmount?: number;
   fineRatePerHundred: number;
   graceDays: number;
   penaltyMultiplier?: number;
@@ -106,6 +109,8 @@ export function computeExpectedMaturityPayout(
 
 function rdDueParamsFromAccount(account: {
   monthlyAmount: Prisma.Decimal;
+  fineCalculationMethodSnapshot: RdFineCalculationMethod;
+  fixedOverdueFineAmountSnapshot: Prisma.Decimal | null;
   fineRatePerHundredSnapshot: Prisma.Decimal;
   graceDaysSnapshot: number;
   penaltyMultiplierSnapshot: Prisma.Decimal | null;
@@ -113,6 +118,8 @@ function rdDueParamsFromAccount(account: {
 }): RdDueParams {
   return {
     monthlyAmount: account.monthlyAmount,
+    fineCalculationMethod: account.fineCalculationMethodSnapshot,
+    fixedOverdueFineAmount: account.fixedOverdueFineAmountSnapshot,
     fineRatePerHundred: account.fineRatePerHundredSnapshot,
     graceDays: account.graceDaysSnapshot,
     penaltyMultiplier: account.penaltyMultiplierSnapshot ?? new Prisma.Decimal(1),
@@ -216,7 +223,15 @@ export const createRdProjectType = async (
       duration: data.duration,
       minimumMonthlyAmount: new Prisma.Decimal(data.minimumMonthlyAmount),
       maturityPerHundred: new Prisma.Decimal(data.maturityPerHundred),
-      fineRatePerHundred: new Prisma.Decimal(data.fineRatePerHundred),
+      fineCalculationMethod: data.fineCalculationMethod,
+      fixedOverdueFineAmount:
+        data.fineCalculationMethod === RdFineCalculationMethod.FIXED_PER_STREAK_UNIT
+          ? new Prisma.Decimal(data.fixedOverdueFineAmount ?? 0)
+          : null,
+      fineRatePerHundred:
+        data.fineCalculationMethod === RdFineCalculationMethod.PROPORTIONAL_PER_HUNDRED
+          ? new Prisma.Decimal(data.fineRatePerHundred)
+          : new Prisma.Decimal(0),
       graceDays: data.graceDays,
       penaltyMultiplier:
         data.penaltyMultiplier !== undefined
@@ -370,6 +385,8 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
         totalPrincipalExpected,
         expectedMaturityPayout,
         maturityPerHundredSnapshot: projectType.maturityPerHundred,
+        fineCalculationMethodSnapshot: projectType.fineCalculationMethod,
+        fixedOverdueFineAmountSnapshot: projectType.fixedOverdueFineAmount,
         fineRatePerHundredSnapshot: projectType.fineRatePerHundred,
         graceDaysSnapshot: projectType.graceDays,
         penaltyMultiplierSnapshot: projectType.penaltyMultiplier,
@@ -420,6 +437,8 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
 
       const params = rdDueParamsFromAccount({
         monthlyAmount,
+        fineCalculationMethodSnapshot: projectType.fineCalculationMethod,
+        fixedOverdueFineAmountSnapshot: projectType.fixedOverdueFineAmount,
         fineRatePerHundredSnapshot: projectType.fineRatePerHundred,
         graceDaysSnapshot: projectType.graceDays,
         penaltyMultiplierSnapshot: projectType.penaltyMultiplier,

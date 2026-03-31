@@ -1,46 +1,32 @@
-import { Prisma, RecurringDepositInstallmentStatus } from "@/generated/prisma/client.js";
+import {
+  Prisma,
+  RecurringDepositInstallmentStatus,
+  RdFineCalculationMethod,
+} from "@/generated/prisma/client.js";
 
 /**
  * Fine model (server-side only):
  * - Overdue when currentDate is after the end of the grace period (dueDate + graceDays, date-only).
- * - Streak: increments for consecutive overdue installments with remaining principal; resets when
- *   an installment is fully paid or is not yet overdue (still within grace / before due).
- * - baseFine = (monthlyAmount / 100) * fineRatePerHundred
- * - fine = baseFine * missedMonths; if missedMonths >= penaltyStartMonth, multiply by penaltyMultiplier.
- * - Within a bucket, payment applies principal first, then fine (FIFO across months).
+ * - Within each maximal contiguous block of overdue installments (each with remaining principal > 0),
+ *   ordered by monthIndex: block length N, oldest installment gets missedMonths = N, next N-1, …,
+ *   newest overdue in the block gets 1 (oldest carries the highest streak multiplier).
+ * - Two base-fine modes (see RdFineCalculationMethod):
+ *   - FIXED_PER_STREAK_UNIT: baseFine = fixedOverdueFineAmount (does not scale with monthly amount).
+ *   - PROPORTIONAL_PER_HUNDRED: baseFine = (monthlyAmount / 100) * fineRatePerHundred.
+ * - fine = baseFine * missedMonths; if missedMonths >= penaltyStartMonth, multiply whole fine by penaltyMultiplier.
+ * - Payment allocation: principal first, then fine (FIFO across months).
  *
- * -------------------------------------------------------------------------------------------------
- * Numerical examples (₹, illustrative — same formulas as code above)
+ * Example — fixed base ₹20, three consecutive overdue months, no penalty multiplier:
+ *   Month1: fine = 20×3 = ₹60; month2: 20×2 = ₹40; month3: 20×1 = ₹20.
  *
- * Common inputs: monthlyAmount = ₹5,000; fineRatePerHundred = 2
- *   → baseFine = (5000 / 100) × 2 = ₹100 per streak step (before penalty multiplier).
- *
- * Example A — On time, no fine
- *   Installment due 1 Mar; graceDays = 7; “today” = 5 Mar → not overdue (still in grace window).
- *   remaining = ₹5,000, fine = ₹0, totalDue = ₹5,000, status PENDING or PARTIAL if partly paid.
- *
- * Example B — Partial payment, not overdue
- *   Same as A, member pays ₹2,000 toward principal only.
- *   remaining = ₹3,000, fine = ₹0, totalDue = ₹3,000, status PARTIAL.
- *
- * Example C — Two consecutive overdue months (assume “today” is after grace for both; graceDays = 0
- *   for simpler dates). penaltyStartMonth = 2, penaltyMultiplier = 1.5
- *   Month 1: streak = 1, fine = 100 × 1 = ₹100 (1 < 2 → no multiplier) → totalDue = 5000 + 100.
- *   Month 2: streak = 2, raw fine = 100 × 2 = ₹200; 2 >= 2 → fine = 200 × 1.5 = ₹300 → totalDue = 5300.
- *   Sum to clear both: ₹5,100 + ₹5,300 = ₹10,400.
- *
- * Example D — FIFO lump sum (same as C)
- *   Payment ₹10,400: month 1 takes ₹5,000 principal + ₹100 fine; month 2 takes ₹5,000 + ₹300; done.
- *   Payment ₹5,100: clears month 1 entirely; month 2 still has ₹5,000 principal + ₹300 fine outstanding.
- *
- * Example E — Scoped months only (monthFilter [1, 2])
- *   maxDue and FIFO consider only installments 1 and 2; same allocation order within that set.
- *
- * Rounding: all money uses Prisma.Decimal; display strings may show 2 decimal places in API/UI.
+ * Rounding: Prisma.Decimal throughout.
  */
 
 export interface RdDueParams {
   monthlyAmount: Prisma.Decimal;
+  fineCalculationMethod: RdFineCalculationMethod;
+  /** Required when fineCalculationMethod is FIXED_PER_STREAK_UNIT */
+  fixedOverdueFineAmount: Prisma.Decimal | null;
   fineRatePerHundred: Prisma.Decimal;
   graceDays: number;
   penaltyMultiplier: Prisma.Decimal;
@@ -85,23 +71,79 @@ export function isOverdue(dueDate: Date, graceDays: number, currentDate: Date): 
   return startOfDay(currentDate) > endOfGracePeriod(dueDate, graceDays);
 }
 
+function resolveBaseFine(params: RdDueParams): Prisma.Decimal {
+  if (params.fineCalculationMethod === RdFineCalculationMethod.FIXED_PER_STREAK_UNIT) {
+    return params.fixedOverdueFineAmount ?? new Prisma.Decimal(0);
+  }
+  return params.monthlyAmount.div(100).mul(params.fineRatePerHundred);
+}
+
+/**
+ * For each contiguous block of overdue installments with remaining > 0, assign missedMonths:
+ * oldest in block gets N, then N-1, …, newest gets 1.
+ */
+function assignMissedMonthsOldestFirst(
+  sorted: InstallmentInput[],
+  remainingById: Map<string, Prisma.Decimal>,
+  overdueById: Map<string, boolean>,
+): Map<string, number> {
+  const missed = new Map<string, number>();
+  let idx = 0;
+  while (idx < sorted.length) {
+    const inst = sorted[idx]!;
+    const remaining = remainingById.get(inst.id) ?? new Prisma.Decimal(0);
+    const overdue = overdueById.get(inst.id) ?? false;
+    if (remaining.lte(0) || !overdue) {
+      missed.set(inst.id, 0);
+      idx += 1;
+      continue;
+    }
+    const start = idx;
+    while (idx < sorted.length) {
+      const i = sorted[idx]!;
+      const r = remainingById.get(i.id) ?? new Prisma.Decimal(0);
+      const o = overdueById.get(i.id) ?? false;
+      if (r.lte(0) || !o) break;
+      idx += 1;
+    }
+    const n = idx - start;
+    for (let k = 0; k < n; k += 1) {
+      const id = sorted[start + k]!.id;
+      missed.set(id, n - k);
+    }
+  }
+  return missed;
+}
+
 export function computeDueLines(
   installments: InstallmentInput[],
   params: RdDueParams,
   currentDate: Date,
 ): DueLine[] {
   const sorted = [...installments].sort((a, b) => a.monthIndex - b.monthIndex);
-  let streak = 0;
-  const lines: DueLine[] = [];
+  const remainingById = new Map<string, Prisma.Decimal>();
+  const overdueById = new Map<string, boolean>();
 
   for (const inst of sorted) {
     const remaining = Prisma.Decimal.max(
       inst.principalAmount.sub(inst.paidPrincipal),
       new Prisma.Decimal(0),
     );
+    remainingById.set(inst.id, remaining);
+    overdueById.set(
+      inst.id,
+      remaining.gt(0) && isOverdue(inst.dueDate, params.graceDays, currentDate),
+    );
+  }
+
+  const missedMonthsById = assignMissedMonthsOldestFirst(sorted, remainingById, overdueById);
+  const baseFine = resolveBaseFine(params);
+  const lines: DueLine[] = [];
+
+  for (const inst of sorted) {
+    const remaining = remainingById.get(inst.id) ?? new Prisma.Decimal(0);
 
     if (remaining.lte(0)) {
-      streak = 0;
       lines.push({
         installmentId: inst.id,
         monthIndex: inst.monthIndex,
@@ -115,21 +157,15 @@ export function computeDueLines(
       continue;
     }
 
-    const overdue = isOverdue(inst.dueDate, params.graceDays, currentDate);
+    const overdue = overdueById.get(inst.id) ?? false;
+    const missedMonths = missedMonthsById.get(inst.id) ?? 0;
 
     let fine = new Prisma.Decimal(0);
-    let missedMonths = 0;
-
-    if (overdue) {
-      streak += 1;
-      missedMonths = streak;
-      const baseFine = params.monthlyAmount.div(100).mul(params.fineRatePerHundred);
+    if (overdue && missedMonths > 0) {
       fine = baseFine.mul(missedMonths);
       if (missedMonths >= params.penaltyStartMonth) {
         fine = fine.mul(params.penaltyMultiplier);
       }
-    } else {
-      streak = 0;
     }
 
     const totalDue = remaining.add(fine);

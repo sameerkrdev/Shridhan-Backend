@@ -428,13 +428,15 @@ model MonthlyInterestSchemeTransaction {
 }
 
 model RecurringDepositProjectType {
-  id                   String             @id @default(uuid())
+  id                   String                 @id @default(uuid())
   name                 String
   duration             Int
-  minimumMonthlyAmount Decimal            @db.Decimal(14, 2)
-  maturityPerHundred   Decimal            @db.Decimal(14, 2)
-  fineRatePerHundred   Decimal            @db.Decimal(14, 2)
-  graceDays            Int                @default(0)
+  minimumMonthlyAmount Decimal                @db.Decimal(14, 2)
+  maturityPerHundred   Decimal                @db.Decimal(14, 2)
+  fineCalculationMethod RdFineCalculationMethod @default(FIXED_PER_STREAK_UNIT)
+  fixedOverdueFineAmount Decimal?             @db.Decimal(14, 2)
+  fineRatePerHundred   Decimal                @db.Decimal(14, 2)
+  graceDays            Int                    @default(0)
   penaltyMultiplier    Decimal?           @db.Decimal(14, 2)
   penaltyStartMonth    Int?
   version              Int                @default(1)
@@ -459,6 +461,8 @@ model RecurringDeposit {
   totalPrincipalExpected     Decimal                       @db.Decimal(14, 2)
   expectedMaturityPayout     Decimal                       @db.Decimal(14, 2)
   maturityPerHundredSnapshot Decimal                       @db.Decimal(14, 2)
+  fineCalculationMethodSnapshot RdFineCalculationMethod
+  fixedOverdueFineAmountSnapshot Decimal?                  @db.Decimal(14, 2)
   fineRatePerHundredSnapshot Decimal                       @db.Decimal(14, 2)
   graceDaysSnapshot          Int
   penaltyMultiplierSnapshot  Decimal?                      @db.Decimal(14, 2)
@@ -681,4 +685,9 @@ enum MaturityCalculationMethod {
 enum MisCalculationMethod {
   MONTHLY_PAYOUT_PER_HUNDRED
   ANNUAL_INTEREST_RATE
+}
+
+enum RdFineCalculationMethod {
+  FIXED_PER_STREAK_UNIT
+  PROPORTIONAL_PER_HUNDRED
 }
