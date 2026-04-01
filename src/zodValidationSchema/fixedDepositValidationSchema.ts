@@ -33,16 +33,38 @@ const upiIdSchema = z
   .regex(/^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$/, "UPI ID must be valid (example@bank)");
 const relationSchema = z.string().trim().min(2, "Relation is required").max(120);
 
-export const createProjectTypeSchema = z.object({
-  body: z.object({
+const maturityCalculationMethodSchema = z.enum(["PER_RS_100", "MULTIPLE_OF_PRINCIPAL"]);
+
+const createProjectTypeBodySchema = z
+  .object({
     name: z.string().trim().min(2, "Name is required").max(120),
     duration: z.number().int().min(1, "Duration must be at least 1 month").max(360),
-    maturityAmountPerHundred: z
-      .number()
-      .min(1, "Maturity amount per hundred must be greater than 0")
-      .max(100000),
-    maturityMultiple: z.number().min(0.1, "Maturity multiple must be greater than 0").max(100),
-  }),
+    minimumAmount: z.number().min(1, "Minimum amount must be greater than 0").max(100000000),
+    maturityCalculationMethod: maturityCalculationMethodSchema,
+    maturityValue: z.number(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.maturityCalculationMethod === "PER_RS_100") {
+      if (data.maturityValue < 1 || data.maturityValue > 100000) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Maturity amount per hundred must be between 1 and 100000",
+          path: ["maturityValue"],
+        });
+      }
+    } else if (data.maturityValue < 0.1 || data.maturityValue > 100) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Maturity multiple must be between 0.1 and 100",
+        path: ["maturityValue"],
+      });
+    }
+  });
+
+export type CreateProjectTypeBody = z.infer<typeof createProjectTypeBodySchema>;
+
+export const createProjectTypeSchema = z.object({
+  body: createProjectTypeBodySchema,
 });
 
 export const listProjectTypesSchema = z.object({

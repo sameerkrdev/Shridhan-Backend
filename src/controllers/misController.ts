@@ -1,24 +1,22 @@
 import {
-  addTransaction,
+  addMisDeposit,
   assertMembership,
-  completeFdDocumentUpload,
-  createFdAccount,
-  createProjectType,
-  getFdDetail,
-  listFdReferrerMembers,
-  listFdAccounts,
-  listProjectTypes,
-  requestFdDocumentUpload,
-  softDeleteProjectType,
-  softDeleteFdAccount,
-  updateFdAccountStatus,
-  updateProjectTypeStatus,
-} from "@/services/fixedDepositService.js";
-import type { Prisma, ServiceStatus } from "@/generated/prisma/client.js";
+  completeMisDocumentUpload,
+  createMisAccount,
+  createMisProjectType,
+  getMisDetail,
+  listMisAccounts,
+  listMisReferrerMembers,
+  listMisProjectTypes,
+  payMisInterest,
+  requestMisDocumentUpload,
+  returnMisPrincipal,
+  softDeleteMisAccount,
+  softDeleteMisProjectType,
+} from "@/services/misService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 import type { NextFunction, Response } from "express";
 import createHttpError from "http-errors";
-import type { CreateProjectTypeBody } from "@/zodValidationSchema/fixedDepositValidationSchema.js";
 
 const getRequiredParam = (value: string | string[] | undefined, field: string) => {
   if (!value || Array.isArray(value)) {
@@ -27,21 +25,21 @@ const getRequiredParam = (value: string | string[] | undefined, field: string) =
   return value;
 };
 
-export const createFdProjectType = async (
+export const createProjectType = async (
   req: IAuthorizedRequest,
   res: Response,
   next: NextFunction,
 ) => {
   try {
     const actor = assertMembership(req);
-    const projectType = await createProjectType(actor, req.body as CreateProjectTypeBody);
+    const projectType = await createMisProjectType(actor, req.body as never);
     res.status(201).json(projectType);
   } catch (error) {
     next(error);
   }
 };
 
-export const getFdProjectTypes = async (
+export const getProjectTypes = async (
   req: IAuthorizedRequest,
   res: Response,
   next: NextFunction,
@@ -50,48 +48,48 @@ export const getFdProjectTypes = async (
     const actor = assertMembership(req);
     const includeDeleted =
       String((req.query.includeDeleted as string | undefined) ?? "false").toLowerCase() === "true";
-    const projectTypes = await listProjectTypes(actor.societyId, includeDeleted);
+    const includeArchived =
+      String((req.query.includeArchived as string | undefined) ?? "false").toLowerCase() === "true";
+    const projectTypes = await listMisProjectTypes(
+      actor.societyId,
+      includeDeleted,
+      includeArchived,
+    );
     res.json({ projectTypes });
   } catch (error) {
     next(error);
   }
 };
 
-export const createFixedDepositAccount = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
+export const createAccount = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
   try {
     const actor = assertMembership(req);
-    const fd = await createFdAccount(actor, req.body as never);
-    res.status(201).json(fd);
+    const account = await createMisAccount(actor, req.body as never);
+    res.status(201).json(account);
   } catch (error) {
     next(error);
   }
 };
 
-export const getFixedDeposits = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
+export const getAccounts = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
   try {
     const actor = assertMembership(req);
+    const includeDeleted =
+      String((req.query.includeDeleted as string | undefined) ?? "false").toLowerCase() === "true";
+
+    const page = Number((req.query.page as string | undefined) ?? "1");
+    const pageSize = Number((req.query.pageSize as string | undefined) ?? "10");
     const sortBy = typeof req.query.sortBy === "string" ? req.query.sortBy : undefined;
     const sortOrder = typeof req.query.sortOrder === "string" ? req.query.sortOrder : undefined;
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    const includeDeleted =
-      String((req.query.includeDeleted as string | undefined) ?? "false").toLowerCase() === "true";
+
     const sorting: {
       sortBy?:
         | "id"
         | "customer_name"
         | "phone"
-        | "plan"
-        | "principal_amount"
-        | "maturity_amount"
-        | "start_date"
+        | "deposit_amount"
+        | "monthly_interest"
         | "maturity_date"
         | "status";
       sortOrder?: "asc" | "desc";
@@ -101,68 +99,39 @@ export const getFixedDeposits = async (
         | "id"
         | "customer_name"
         | "phone"
-        | "plan"
-        | "principal_amount"
-        | "maturity_amount"
-        | "start_date"
+        | "deposit_amount"
+        | "monthly_interest"
         | "maturity_date"
         | "status";
     }
     if (sortOrder) {
       sorting.sortOrder = sortOrder as "asc" | "desc";
     }
-    const fixedDeposits = await listFdAccounts(actor.societyId, sorting, includeDeleted, search);
-    res.json({ fixedDeposits });
+
+    const payload = await listMisAccounts(
+      actor.societyId,
+      { page, pageSize },
+      sorting,
+      includeDeleted,
+      search,
+    );
+    res.json(payload);
   } catch (error) {
     next(error);
   }
 };
 
-export const getFixedDepositDetail = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
+export const getReferrers = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
   try {
     const actor = assertMembership(req);
-    const id = getRequiredParam(req.params.id, "id");
-    const fixedDeposit = await getFdDetail(id, actor.societyId);
-    res.json(fixedDeposit);
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const createFixedDepositTransaction = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const actor = assertMembership(req);
-    const id = getRequiredParam(req.params.id, "id");
-    const transaction = await addTransaction(actor, id, req.body as never);
-    res.status(201).json(transaction);
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const getFdReferrers = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const actor = assertMembership(req);
-    const members = await listFdReferrerMembers(actor.societyId);
+    const members = await listMisReferrerMembers(actor.societyId);
     res.json({ members });
   } catch (error) {
     next(error);
   }
 };
 
-export const createFdDocumentUploadUrl = async (
+export const getAccountDetail = async (
   req: IAuthorizedRequest,
   res: Response,
   next: NextFunction,
@@ -170,14 +139,66 @@ export const createFdDocumentUploadUrl = async (
   try {
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
-    const response = await requestFdDocumentUpload(actor, id, req.body as never);
+    const account = await getMisDetail(id, actor.societyId);
+    res.json(account);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const addDeposit = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const transaction = await addMisDeposit(actor, id, req.body as never);
+    res.status(201).json(transaction);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const payInterest = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const payload = await payMisInterest(actor, id, req.body as never);
+    res.status(201).json(payload);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const returnPrincipal = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const payload = await returnMisPrincipal(actor, id, req.body as never);
+    res.status(201).json(payload);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createMisDocumentUploadUrl = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const response = await requestMisDocumentUpload(actor, id, req.body as never);
     res.status(201).json(response);
   } catch (error) {
     next(error);
   }
 };
 
-export const markFdDocumentUploaded = async (
+export const markMisDocumentUploaded = async (
   req: IAuthorizedRequest,
   res: Response,
   next: NextFunction,
@@ -186,66 +207,24 @@ export const markFdDocumentUploaded = async (
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
     const documentId = getRequiredParam(req.params.documentId, "documentId");
-    res.json(await completeFdDocumentUpload(actor, id, documentId));
+    res.json(await completeMisDocumentUpload(actor, id, documentId));
   } catch (error) {
     next(error);
   }
 };
 
-export const changeFixedDepositStatus = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
+export const deleteAccount = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
   try {
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
-    const { status } = req.body as { status: ServiceStatus };
-
-    const updateStatusFn: (
-      actor: Prisma.MembershipModel,
-      fixDepositId: string,
-      status: ServiceStatus,
-    ) => Promise<unknown> = updateFdAccountStatus;
-    res.json(await updateStatusFn(actor, id, status));
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const changeFixedDepositProjectTypeStatus = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const actor = assertMembership(req);
-    const id = getRequiredParam(req.params.id, "id");
-    const { status } = req.body as { status: "ACTIVE" | "SUSPENDED" };
-
-    res.json(await updateProjectTypeStatus(actor, id, status));
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const deleteFixedDepositAccount = async (
-  req: IAuthorizedRequest,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    const actor = assertMembership(req);
-    const id = getRequiredParam(req.params.id, "id");
-
-    await softDeleteFdAccount(actor, id);
+    await softDeleteMisAccount(actor, id);
     res.json({ success: true });
   } catch (error) {
     next(error);
   }
 };
 
-export const deleteFixedDepositProjectType = async (
+export const deleteProjectType = async (
   req: IAuthorizedRequest,
   res: Response,
   next: NextFunction,
@@ -253,8 +232,7 @@ export const deleteFixedDepositProjectType = async (
   try {
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
-
-    await softDeleteProjectType(actor, id);
+    await softDeleteMisProjectType(actor, id);
     res.json({ success: true });
   } catch (error) {
     next(error);

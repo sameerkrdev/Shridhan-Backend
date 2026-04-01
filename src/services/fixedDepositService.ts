@@ -2,6 +2,7 @@ import prisma from "@/config/prisma.js";
 import {
   Prisma,
   CustomerAccountType,
+  type MaturityCalculationMethod,
   type PaymentMethod,
   ServiceType,
   ServiceStatus,
@@ -27,21 +28,41 @@ const calculateMaturityDate = (startDate: Date, durationInMonths: number) => {
   return maturityDate;
 };
 
+const computeFdMaturityAmount = (
+  depositAmount: Prisma.Decimal,
+  projectType: {
+    maturityCalculationMethod: MaturityCalculationMethod;
+    maturityAmountPerHundred: Prisma.Decimal;
+    maturityMultiple: Prisma.Decimal;
+  },
+) => {
+  if (projectType.maturityCalculationMethod === "MULTIPLE_OF_PRINCIPAL") {
+    return depositAmount.mul(projectType.maturityMultiple);
+  }
+  return depositAmount.div(100).mul(projectType.maturityAmountPerHundred);
+};
+
 export const createProjectType = async (
   actor: Prisma.MembershipModel,
   data: {
     name: string;
     duration: number;
-    maturityAmountPerHundred: number;
-    maturityMultiple: number;
+    minimumAmount: number;
+    maturityCalculationMethod: "PER_RS_100" | "MULTIPLE_OF_PRINCIPAL";
+    maturityValue: number;
   },
 ) => {
+  const isPerRs100 = data.maturityCalculationMethod === "PER_RS_100";
   return prisma.fixedDepositProjectType.create({
     data: {
       name: data.name,
       duration: data.duration,
-      maturityAmountPerHundred: new Prisma.Decimal(data.maturityAmountPerHundred),
-      maturityMultiple: new Prisma.Decimal(data.maturityMultiple),
+      minimumAmount: new Prisma.Decimal(data.minimumAmount),
+      maturityCalculationMethod: data.maturityCalculationMethod,
+      maturityAmountPerHundred: isPerRs100
+        ? new Prisma.Decimal(data.maturityValue)
+        : new Prisma.Decimal(0),
+      maturityMultiple: isPerRs100 ? new Prisma.Decimal(0) : new Prisma.Decimal(data.maturityValue),
       societyId: actor.societyId,
       createdBy: actor.userId,
     },
@@ -197,8 +218,14 @@ export const createFdAccount = async (
     }
 
     const depositAmount = new Prisma.Decimal(data.fd.depositAmount);
+    if (depositAmount.lt(projectType.minimumAmount)) {
+      throw createHttpError(
+        400,
+        `Deposit amount must be greater than or equal to minimum amount (${projectType.minimumAmount.toFixed(2)})`,
+      );
+    }
     const initialPaymentAmountDecimal = new Prisma.Decimal(initialPaymentAmount);
-    const maturityAmount = depositAmount.div(100).mul(projectType.maturityAmountPerHundred);
+    const maturityAmount = computeFdMaturityAmount(depositAmount, projectType);
     const maturityDate = calculateMaturityDate(new Date(data.fd.startDate), projectType.duration);
     const linkedMembershipId = data.referrerMembershipId ?? actor.id;
 

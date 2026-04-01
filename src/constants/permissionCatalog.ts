@@ -1,4 +1,11 @@
-export type PermissionResource = "membership" | "society" | "role" | "user" | "fixed_deposit";
+export type PermissionResource =
+  | "membership"
+  | "society"
+  | "role"
+  | "user"
+  | "fixed_deposit"
+  | "mis"
+  | "recurring_deposit";
 
 export interface PermissionResourceMeta {
   key: PermissionResource;
@@ -39,6 +46,16 @@ export const PERMISSION_RESOURCES: PermissionResourceMeta[] = [
     key: "fixed_deposit",
     label: "Fixed Deposit Management",
     description: "Manage fixed deposit plans, accounts, and transactions.",
+  },
+  {
+    key: "mis",
+    label: "Monthly Interest Scheme Management",
+    description: "Manage MIS project types, accounts, deposits, interest payouts, and closure.",
+  },
+  {
+    key: "recurring_deposit",
+    label: "Recurring Deposit Management",
+    description: "Manage RD project types, accounts, installments, payments, and maturity withdrawal.",
   },
 ];
 
@@ -182,6 +199,125 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     action: "remove_project_type",
     label: "Remove Fixed Deposit Project Types",
     description: "Soft delete fixed deposit project types.",
+  },
+  {
+    key: "mis.create",
+    resource: "mis",
+    action: "create",
+    label: "Create MIS Accounts",
+    description: "Create MIS project types and MIS accounts.",
+  },
+  {
+    key: "mis.read",
+    resource: "mis",
+    action: "read",
+    label: "View MIS Account",
+    description: "View details of an MIS account.",
+  },
+  {
+    key: "mis.list",
+    resource: "mis",
+    action: "list",
+    label: "View MIS Accounts",
+    description: "View all MIS accounts and project types in the society.",
+  },
+  {
+    key: "mis.deposit",
+    resource: "mis",
+    action: "deposit",
+    label: "Record MIS Deposits",
+    description: "Record split or full MIS deposit transactions.",
+  },
+  {
+    key: "mis.pay_interest",
+    resource: "mis",
+    action: "pay_interest",
+    label: "Record MIS Interest Payouts",
+    description: "Record monthly interest payouts for MIS accounts.",
+  },
+  {
+    key: "mis.return_principal",
+    resource: "mis",
+    action: "return_principal",
+    label: "Return MIS Principal",
+    description: "Return principal amount on MIS maturity and close account.",
+  },
+  {
+    key: "mis.update_status",
+    resource: "mis",
+    action: "update_status",
+    label: "Update MIS Status",
+    description: "Manually update MIS account status where allowed.",
+  },
+  {
+    key: "mis.remove",
+    resource: "mis",
+    action: "remove",
+    label: "Remove MIS Accounts",
+    description: "Soft delete MIS accounts.",
+  },
+  {
+    key: "mis.remove_project_type",
+    resource: "mis",
+    action: "remove_project_type",
+    label: "Remove MIS Project Types",
+    description: "Soft delete MIS project types.",
+  },
+  {
+    key: "recurring_deposit.create",
+    resource: "recurring_deposit",
+    action: "create",
+    label: "Create RD Accounts",
+    description: "Create RD project types and RD accounts.",
+  },
+  {
+    key: "recurring_deposit.read",
+    resource: "recurring_deposit",
+    action: "read",
+    label: "View RD Account",
+    description: "View details of an RD account.",
+  },
+  {
+    key: "recurring_deposit.list",
+    resource: "recurring_deposit",
+    action: "list",
+    label: "View RD Accounts",
+    description: "View all RD accounts and project types in the society.",
+  },
+  {
+    key: "recurring_deposit.pay",
+    resource: "recurring_deposit",
+    action: "pay",
+    label: "Record RD Payments",
+    description: "Preview and record installment payments for RD accounts.",
+  },
+  {
+    key: "recurring_deposit.pay_skip_fine",
+    resource: "recurring_deposit",
+    action: "pay_skip_fine",
+    label: "Skip RD Fine During Payment",
+    description: "Allow deferring installment penalties for maturity-time deduction.",
+  },
+  {
+    key: "recurring_deposit.withdraw",
+    resource: "recurring_deposit",
+    action: "withdraw",
+    label: "RD Maturity Withdrawal",
+    description: "Withdraw maturity amount after all installments are paid.",
+  },
+  {
+    key: "recurring_deposit.remove",
+    resource: "recurring_deposit",
+    action: "remove",
+    label: "Remove RD Accounts",
+    description: "Soft delete RD accounts.",
+  },
+  {
+    key: "recurring_deposit.remove_project_type",
+    resource: "recurring_deposit",
+    action: "remove_project_type",
+    label: "Remove RD Project Types",
+    description: "Soft delete RD project types.",
   },
 ];
 

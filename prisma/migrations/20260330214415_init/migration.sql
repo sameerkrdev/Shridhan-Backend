@@ -1,11 +1,11 @@
 -- CreateEnum
-CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'PAUSED', 'CANCELLED', 'EXPIRED', 'PAYMENT_FAILED', 'PENDING_ACTIVATION');
+CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'PAUSED', 'CANCELLED', 'PAYMENT_FAILED', 'PENDING_ACTIVATION');
 
 -- CreateEnum
-CREATE TYPE "MandateStatus" AS ENUM ('ACTIVE', 'EXPIRED', 'PENDING', 'FAILED', 'NOT_REQUIRED');
+CREATE TYPE "MandateStatus" AS ENUM ('ACTIVE', 'PENDING', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "SubscriptionTransactionStatus" AS ENUM ('SUCCESS', 'FAILED', 'PENDING', 'PROCESSING', 'NOT_INITIATED', 'REFUNDED');
+CREATE TYPE "SubscriptionTransactionStatus" AS ENUM ('SUCCESS', 'FAILED', 'PENDING', 'REFUNDED');
 
 -- CreateEnum
 CREATE TYPE "LoanStatus" AS ENUM ('ONGOING', 'COMPLETED');
@@ -14,13 +14,16 @@ CREATE TYPE "LoanStatus" AS ENUM ('ONGOING', 'COMPLETED');
 CREATE TYPE "LoanEmiStatus" AS ENUM ('PENDING', 'PAID');
 
 -- CreateEnum
-CREATE TYPE "ServiceStatus" AS ENUM ('ACTIVE', 'COMPLETED', 'CLOSED');
+CREATE TYPE "ServiceStatus" AS ENUM ('PENDING_DEPOSIT', 'ACTIVE', 'COMPLETED', 'CLOSED');
 
 -- CreateEnum
-CREATE TYPE "TransactionType" AS ENUM ('CREDIT', 'PAYOUT');
+CREATE TYPE "TransactionType" AS ENUM ('CREDIT', 'PAYOUT', 'DEPOSIT', 'INTEREST_PAYOUT', 'PRINCIPAL_RETURN');
 
 -- CreateEnum
 CREATE TYPE "RecurringDepositTransactionType" AS ENUM ('CREDIT', 'PAYOUT');
+
+-- CreateEnum
+CREATE TYPE "RecurringDepositInstallmentStatus" AS ENUM ('PENDING', 'OVERDUE', 'PARTIAL', 'PAID');
 
 -- CreateEnum
 CREATE TYPE "ServiceType" AS ENUM ('FIX_DEPOSIT', 'RECURING_DEPOSIT', 'MONTHLY_INTEREST_SCHEME');
@@ -33,6 +36,9 @@ CREATE TYPE "PaymentMethod" AS ENUM ('UPI', 'CASH', 'CHEQUE');
 
 -- CreateEnum
 CREATE TYPE "CustomerAccountType" AS ENUM ('LOAN', 'FIXED_DEPOSIT', 'MONTHLY_INTEREST_SCHEME', 'RECURING_DEPOSIT');
+
+-- CreateEnum
+CREATE TYPE "MaturityCalculationMethod" AS ENUM ('PER_RS_100', 'MULTIPLE_OF_PRINCIPAL');
 
 -- CreateTable
 CREATE TABLE "Society" (
@@ -58,18 +64,11 @@ CREATE TABLE "Society" (
 CREATE TABLE "SocietyPlanSettings" (
     "id" TEXT NOT NULL,
     "societyId" TEXT NOT NULL,
-    "planId" TEXT,
-    "planName" TEXT,
-    "planAmount" DECIMAL(14,2),
-    "currency" TEXT DEFAULT 'INR',
-    "maxCustomers" INTEGER,
-    "isTrialUsed" BOOLEAN NOT NULL DEFAULT false,
+    "trialStartDate" TIMESTAMP(3),
     "trialEndDate" TIMESTAMP(3),
-    "graceUntil" TIMESTAMP(3),
     "developerOverrideEnabled" BOOLEAN NOT NULL DEFAULT false,
     "setupFeeEnabled" BOOLEAN NOT NULL DEFAULT true,
     "setupFeeAmount" DECIMAL(14,2) NOT NULL DEFAULT 50000,
-    "setupFeeDueAt" TIMESTAMP(3),
     "setupFeePaid" BOOLEAN NOT NULL DEFAULT false,
     "setupFeePaidAt" TIMESTAMP(3),
     "setupFeePaymentId" TEXT,
@@ -77,7 +76,6 @@ CREATE TABLE "SocietyPlanSettings" (
     "customOneTimeFeeAmount" DECIMAL(14,2),
     "customOneTimeFeeWaived" BOOLEAN NOT NULL DEFAULT false,
     "customSubscriptionEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "customSubscriptionPlanId" TEXT,
     "customSubscriptionAmount" DECIMAL(14,2),
     "customSubscriptionWaived" BOOLEAN NOT NULL DEFAULT false,
     "billingPolicySetByDeveloperId" TEXT,
@@ -99,6 +97,8 @@ CREATE TABLE "Subscription" (
     "planAmount" DECIMAL(14,2) NOT NULL,
     "billingPeriod" INTEGER NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'INR',
+    "oneTimeAddonApplied" BOOLEAN NOT NULL DEFAULT false,
+    "oneTimeAddonAmount" DECIMAL(14,2),
     "status" "SubscriptionStatus" NOT NULL,
     "startDate" TIMESTAMP(3) NOT NULL,
     "nextBillingAt" TIMESTAMP(3) NOT NULL,
@@ -107,7 +107,6 @@ CREATE TABLE "Subscription" (
     "mandateStatus" "MandateStatus" NOT NULL DEFAULT 'PENDING',
     "mandateUpdatedAt" TIMESTAMP(3),
     "retryCount" INTEGER NOT NULL DEFAULT 0,
-    "maxRetries" INTEGER NOT NULL DEFAULT 3,
     "isInGrace" BOOLEAN NOT NULL DEFAULT false,
     "graceEndDate" TIMESTAMP(3),
     "societyId" TEXT NOT NULL,
@@ -121,11 +120,13 @@ CREATE TABLE "Subscription" (
 CREATE TABLE "SubscriptionTransaction" (
     "id" TEXT NOT NULL,
     "amount" DECIMAL(14,2) NOT NULL,
-    "status" "SubscriptionTransactionStatus" NOT NULL DEFAULT 'NOT_INITIATED',
+    "status" "SubscriptionTransactionStatus" NOT NULL DEFAULT 'PENDING',
     "isPaid" BOOLEAN NOT NULL DEFAULT false,
     "razorpayPaymentId" TEXT,
+    "razorpayRefundId" TEXT,
     "billingDate" TIMESTAMP(3) NOT NULL,
     "paymentDate" TIMESTAMP(3),
+    "refundDate" TIMESTAMP(3),
     "paymentMethod" "PaymentMethod",
     "paymentCycleCount" INTEGER NOT NULL,
     "subscriptionId" TEXT NOT NULL,
@@ -247,8 +248,10 @@ CREATE TABLE "Nominee" (
 CREATE TABLE "FixedDepositProjectType" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "minimumAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "maturityMultiple" DECIMAL(14,2) NOT NULL,
     "maturityAmountPerHundred" DECIMAL(14,2) NOT NULL,
+    "maturityCalculationMethod" "MaturityCalculationMethod" NOT NULL DEFAULT 'PER_RS_100',
     "duration" INTEGER NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
@@ -266,6 +269,7 @@ CREATE TABLE "FixedDepositProjectType" (
 -- CreateTable
 CREATE TABLE "FixDeposit" (
     "id" TEXT NOT NULL,
+    "principalAmount" DECIMAL(14,2) NOT NULL,
     "startDate" TIMESTAMP(3) NOT NULL,
     "maturityAmount" DECIMAL(14,2) NOT NULL,
     "maturityDate" TIMESTAMP(3) NOT NULL,
@@ -305,11 +309,37 @@ CREATE TABLE "FixDepositTransaction" (
 );
 
 -- CreateTable
+CREATE TABLE "ServiceDocument" (
+    "id" TEXT NOT NULL,
+    "serviceType" "ServiceType" NOT NULL,
+    "serviceEntityId" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "displayName" TEXT NOT NULL,
+    "objectKey" TEXT NOT NULL,
+    "fileUrl" TEXT NOT NULL,
+    "contentType" TEXT,
+    "sizeBytes" INTEGER,
+    "isUploaded" BOOLEAN NOT NULL DEFAULT false,
+    "fixDepositId" TEXT,
+    "recurringDepositId" TEXT,
+    "monthlyInterestSchemeId" TEXT,
+    "loanId" TEXT,
+    "isDeleted" BOOLEAN NOT NULL DEFAULT false,
+    "deletedAt" TIMESTAMP(3),
+    "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ServiceDocument_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "MonthlyInterestSchemeProjectType" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "payoutInPercentPerHundred" DECIMAL(14,2) NOT NULL,
-    "payoutPerHundred" DECIMAL(14,2) NOT NULL,
+    "minimumAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "monthlyPayoutAmountPerThousand" DECIMAL(14,2) NOT NULL,
     "duration" INTEGER NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
@@ -327,6 +357,8 @@ CREATE TABLE "MonthlyInterestSchemeProjectType" (
 -- CreateTable
 CREATE TABLE "MonthlyInterestScheme" (
     "id" TEXT NOT NULL,
+    "depositAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "monthlyInterest" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "startDate" TIMESTAMP(3) NOT NULL,
     "maturityAmount" DECIMAL(14,2) NOT NULL,
     "maturityDate" TIMESTAMP(3) NOT NULL,
@@ -346,6 +378,7 @@ CREATE TABLE "MonthlyInterestScheme" (
 -- CreateTable
 CREATE TABLE "MonthlyInterestSchemeTransaction" (
     "id" TEXT NOT NULL,
+    "isExpected" BOOLEAN NOT NULL DEFAULT false,
     "month" INTEGER,
     "amount" DECIMAL(14,2) NOT NULL,
     "type" "TransactionType" NOT NULL,
@@ -369,9 +402,13 @@ CREATE TABLE "MonthlyInterestSchemeTransaction" (
 CREATE TABLE "RecurringDepositProjectType" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "maturityMultiple" DECIMAL(14,2) NOT NULL,
-    "maturityAmountPerHundred" DECIMAL(14,2) NOT NULL,
     "duration" INTEGER NOT NULL,
+    "minimumMonthlyAmount" DECIMAL(14,2) NOT NULL,
+    "maturityPerHundred" DECIMAL(14,2) NOT NULL,
+    "fineRatePerHundred" DECIMAL(14,2) NOT NULL,
+    "graceDays" INTEGER NOT NULL DEFAULT 0,
+    "penaltyMultiplier" DECIMAL(14,2),
+    "penaltyStartMonth" INTEGER,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
     "societyId" TEXT NOT NULL,
@@ -388,15 +425,16 @@ CREATE TABLE "RecurringDepositProjectType" (
 -- CreateTable
 CREATE TABLE "RecurringDeposit" (
     "id" TEXT NOT NULL,
-    "isProjectTypeCustom" BOOLEAN NOT NULL,
-    "depositAmount" DECIMAL(14,2) NOT NULL,
-    "payoutAmount" DECIMAL(14,2) NOT NULL,
-    "interestRate" DECIMAL(14,2) NOT NULL,
-    "fineBaseRate" DECIMAL(14,2) NOT NULL,
-    "fineCurrentRate" DECIMAL(14,2) NOT NULL,
-    "fineAccumulated" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "monthlyAmount" DECIMAL(14,2) NOT NULL,
+    "totalPrincipalExpected" DECIMAL(14,2) NOT NULL,
+    "expectedMaturityPayout" DECIMAL(14,2) NOT NULL,
+    "maturityPerHundredSnapshot" DECIMAL(14,2) NOT NULL,
+    "fineRatePerHundredSnapshot" DECIMAL(14,2) NOT NULL,
+    "graceDaysSnapshot" INTEGER NOT NULL,
+    "penaltyMultiplierSnapshot" DECIMAL(14,2),
+    "penaltyStartMonthSnapshot" INTEGER,
     "startDate" TIMESTAMP(3) NOT NULL,
-    "endDate" TIMESTAMP(3) NOT NULL,
+    "maturityDate" TIMESTAMP(3) NOT NULL,
     "status" "ServiceStatus" NOT NULL,
     "projectTypeId" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
@@ -411,13 +449,38 @@ CREATE TABLE "RecurringDeposit" (
 );
 
 -- CreateTable
+CREATE TABLE "RecurringDepositInstallment" (
+    "id" TEXT NOT NULL,
+    "recurringDepositId" TEXT NOT NULL,
+    "monthIndex" INTEGER NOT NULL,
+    "dueDate" TIMESTAMP(3) NOT NULL,
+    "principalAmount" DECIMAL(14,2) NOT NULL,
+    "paidPrincipal" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "deferredFineAccrued" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "status" "RecurringDepositInstallmentStatus" NOT NULL DEFAULT 'PENDING',
+    "isDeleted" BOOLEAN NOT NULL DEFAULT false,
+    "deletedAt" TIMESTAMP(3),
+    "createdBy" TEXT NOT NULL,
+    "updatedBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RecurringDepositInstallment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "RecurringDepositTransaction" (
     "id" TEXT NOT NULL,
     "recurringDepositId" TEXT NOT NULL,
-    "month" TEXT NOT NULL,
     "amount" DECIMAL(14,2) NOT NULL,
+    "principalAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "fineAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
     "type" "RecurringDepositTransactionType" NOT NULL,
+    "paymentMethod" "PaymentMethod",
+    "transactionId" TEXT,
+    "upiId" TEXT,
+    "chequeNumber" TEXT,
+    "bankName" TEXT,
     "isDeleted" BOOLEAN NOT NULL DEFAULT false,
     "deletedAt" TIMESTAMP(3),
     "createdBy" TEXT NOT NULL,
@@ -426,6 +489,18 @@ CREATE TABLE "RecurringDepositTransaction" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "RecurringDepositTransaction_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RecurringDepositPaymentAllocation" (
+    "id" TEXT NOT NULL,
+    "transactionId" TEXT NOT NULL,
+    "installmentId" TEXT NOT NULL,
+    "principalApplied" DECIMAL(14,2) NOT NULL,
+    "fineApplied" DECIMAL(14,2) NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RecurringDepositPaymentAllocation_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -510,6 +585,9 @@ CREATE INDEX "Subscription_status_idx" ON "Subscription"("status");
 CREATE UNIQUE INDEX "SubscriptionTransaction_razorpayPaymentId_key" ON "SubscriptionTransaction"("razorpayPaymentId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "SubscriptionTransaction_razorpayRefundId_key" ON "SubscriptionTransaction"("razorpayRefundId");
+
+-- CreateIndex
 CREATE INDEX "SubscriptionTransaction_subscriptionId_idx" ON "SubscriptionTransaction"("subscriptionId");
 
 -- CreateIndex
@@ -585,10 +663,37 @@ CREATE INDEX "FixDeposit_projectTypeId_idx" ON "FixDeposit"("projectTypeId");
 CREATE INDEX "FixDeposit_customerId_idx" ON "FixDeposit"("customerId");
 
 -- CreateIndex
+CREATE INDEX "FixDeposit_maturityDate_idx" ON "FixDeposit"("maturityDate");
+
+-- CreateIndex
 CREATE INDEX "FixDepositTransaction_fixDepositId_idx" ON "FixDepositTransaction"("fixDepositId");
 
 -- CreateIndex
 CREATE INDEX "FixDepositTransaction_transactionId_idx" ON "FixDepositTransaction"("transactionId");
+
+-- CreateIndex
+CREATE INDEX "FixDepositTransaction_createdAt_idx" ON "FixDepositTransaction"("createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ServiceDocument_objectKey_key" ON "ServiceDocument"("objectKey");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_fixDepositId_idx" ON "ServiceDocument"("fixDepositId");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_isUploaded_idx" ON "ServiceDocument"("isUploaded");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_serviceType_serviceEntityId_idx" ON "ServiceDocument"("serviceType", "serviceEntityId");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_recurringDepositId_idx" ON "ServiceDocument"("recurringDepositId");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_monthlyInterestSchemeId_idx" ON "ServiceDocument"("monthlyInterestSchemeId");
+
+-- CreateIndex
+CREATE INDEX "ServiceDocument_loanId_idx" ON "ServiceDocument"("loanId");
 
 -- CreateIndex
 CREATE INDEX "MonthlyInterestSchemeProjectType_societyId_idx" ON "MonthlyInterestSchemeProjectType"("societyId");
@@ -609,6 +714,9 @@ CREATE INDEX "MonthlyInterestSchemeTransaction_monthlyInterestSchemeId_idx" ON "
 CREATE INDEX "MonthlyInterestSchemeTransaction_transactionId_idx" ON "MonthlyInterestSchemeTransaction"("transactionId");
 
 -- CreateIndex
+CREATE INDEX "MonthlyInterestSchemeTransaction_monthlyInterestSchemeId_mo_idx" ON "MonthlyInterestSchemeTransaction"("monthlyInterestSchemeId", "month", "isExpected");
+
+-- CreateIndex
 CREATE INDEX "RecurringDepositProjectType_societyId_idx" ON "RecurringDepositProjectType"("societyId");
 
 -- CreateIndex
@@ -621,7 +729,22 @@ CREATE INDEX "RecurringDeposit_projectTypeId_idx" ON "RecurringDeposit"("project
 CREATE INDEX "RecurringDeposit_customerId_idx" ON "RecurringDeposit"("customerId");
 
 -- CreateIndex
+CREATE INDEX "RecurringDepositInstallment_recurringDepositId_dueDate_idx" ON "RecurringDepositInstallment"("recurringDepositId", "dueDate");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RecurringDepositInstallment_recurringDepositId_monthIndex_key" ON "RecurringDepositInstallment"("recurringDepositId", "monthIndex");
+
+-- CreateIndex
 CREATE INDEX "RecurringDepositTransaction_recurringDepositId_idx" ON "RecurringDepositTransaction"("recurringDepositId");
+
+-- CreateIndex
+CREATE INDEX "RecurringDepositTransaction_transactionId_idx" ON "RecurringDepositTransaction"("transactionId");
+
+-- CreateIndex
+CREATE INDEX "RecurringDepositPaymentAllocation_transactionId_idx" ON "RecurringDepositPaymentAllocation"("transactionId");
+
+-- CreateIndex
+CREATE INDEX "RecurringDepositPaymentAllocation_installmentId_idx" ON "RecurringDepositPaymentAllocation"("installmentId");
 
 -- CreateIndex
 CREATE INDEX "Loan_customerId_idx" ON "Loan"("customerId");
@@ -642,13 +765,13 @@ ALTER TABLE "SubscriptionTransaction" ADD CONSTRAINT "SubscriptionTransaction_su
 ALTER TABLE "SubscriptionStateTransition" ADD CONSTRAINT "SubscriptionStateTransition_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "SocietyRole"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Membership" ADD CONSTRAINT "Membership_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Membership" ADD CONSTRAINT "Membership_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "SocietyRole"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SocietyRole" ADD CONSTRAINT "SocietyRole_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -657,10 +780,10 @@ ALTER TABLE "SocietyRole" ADD CONSTRAINT "SocietyRole_societyId_fkey" FOREIGN KE
 ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_membershipId_fkey" FOREIGN KEY ("membershipId") REFERENCES "Membership"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_membershipId_fkey" FOREIGN KEY ("membershipId") REFERENCES "Membership"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Nominee" ADD CONSTRAINT "Nominee_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -669,22 +792,34 @@ ALTER TABLE "Nominee" ADD CONSTRAINT "Nominee_customerId_fkey" FOREIGN KEY ("cus
 ALTER TABLE "FixedDepositProjectType" ADD CONSTRAINT "FixedDepositProjectType_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "FixDeposit" ADD CONSTRAINT "FixDeposit_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "FixedDepositProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FixDeposit" ADD CONSTRAINT "FixDeposit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "FixDeposit" ADD CONSTRAINT "FixDeposit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FixDeposit" ADD CONSTRAINT "FixDeposit_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "FixedDepositProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "FixDepositTransaction" ADD CONSTRAINT "FixDepositTransaction_fixDepositId_fkey" FOREIGN KEY ("fixDepositId") REFERENCES "FixDeposit"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ServiceDocument" ADD CONSTRAINT "ServiceDocument_fixDepositId_fkey" FOREIGN KEY ("fixDepositId") REFERENCES "FixDeposit"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceDocument" ADD CONSTRAINT "ServiceDocument_loanId_fkey" FOREIGN KEY ("loanId") REFERENCES "Loan"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceDocument" ADD CONSTRAINT "ServiceDocument_monthlyInterestSchemeId_fkey" FOREIGN KEY ("monthlyInterestSchemeId") REFERENCES "MonthlyInterestScheme"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ServiceDocument" ADD CONSTRAINT "ServiceDocument_recurringDepositId_fkey" FOREIGN KEY ("recurringDepositId") REFERENCES "RecurringDeposit"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "MonthlyInterestSchemeProjectType" ADD CONSTRAINT "MonthlyInterestSchemeProjectType_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MonthlyInterestScheme" ADD CONSTRAINT "MonthlyInterestScheme_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "MonthlyInterestSchemeProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "MonthlyInterestScheme" ADD CONSTRAINT "MonthlyInterestScheme_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MonthlyInterestScheme" ADD CONSTRAINT "MonthlyInterestScheme_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "MonthlyInterestScheme" ADD CONSTRAINT "MonthlyInterestScheme_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "MonthlyInterestSchemeProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MonthlyInterestSchemeTransaction" ADD CONSTRAINT "MonthlyInterestSchemeTransaction_monthlyInterestSchemeId_fkey" FOREIGN KEY ("monthlyInterestSchemeId") REFERENCES "MonthlyInterestScheme"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -693,13 +828,22 @@ ALTER TABLE "MonthlyInterestSchemeTransaction" ADD CONSTRAINT "MonthlyInterestSc
 ALTER TABLE "RecurringDepositProjectType" ADD CONSTRAINT "RecurringDepositProjectType_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "Society"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "RecurringDeposit" ADD CONSTRAINT "RecurringDeposit_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "RecurringDepositProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "RecurringDeposit" ADD CONSTRAINT "RecurringDeposit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "RecurringDeposit" ADD CONSTRAINT "RecurringDeposit_projectTypeId_fkey" FOREIGN KEY ("projectTypeId") REFERENCES "RecurringDepositProjectType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecurringDepositInstallment" ADD CONSTRAINT "RecurringDepositInstallment_recurringDepositId_fkey" FOREIGN KEY ("recurringDepositId") REFERENCES "RecurringDeposit"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "RecurringDepositTransaction" ADD CONSTRAINT "RecurringDepositTransaction_recurringDepositId_fkey" FOREIGN KEY ("recurringDepositId") REFERENCES "RecurringDeposit"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecurringDepositPaymentAllocation" ADD CONSTRAINT "RecurringDepositPaymentAllocation_installmentId_fkey" FOREIGN KEY ("installmentId") REFERENCES "RecurringDepositInstallment"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RecurringDepositPaymentAllocation" ADD CONSTRAINT "RecurringDepositPaymentAllocation_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "RecurringDepositTransaction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Loan" ADD CONSTRAINT "Loan_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
