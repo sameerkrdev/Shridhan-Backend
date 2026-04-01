@@ -10,7 +10,7 @@
     "setup:dev": "pnpm install && pnpm prepare && pnpm prisma:generate && pnpm dev",
     "pre-deploy": "pnpm prepare && pnpm prisma:generate",
     "dev": "nodemon",
-    "build": "pnpm prisma:generate && tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
