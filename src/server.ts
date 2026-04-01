@@ -6,9 +6,12 @@ import { startBillingReminderScheduler } from "@/services/billingReminderSchedul
 import env from "@/config/dotenv.js";
 
 let server: Server;
+let isShuttingDown = false;
 
 // Graceful shutdown
 const shutdown = async (code = 0) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   logger.info("Shutting down application...");
 
   try {
@@ -57,30 +60,27 @@ redisClient.on("ready", () => {
 
 redisClient.on("error", (err) => {
   logger.error("Redis error:", err);
-  void shutdown(1);
 });
 
 redisClient.on("end", () => {
-  logger.error("Redis connection ended");
-  void shutdown(1);
+  logger.warn("Redis connection ended");
 });
 
 // Start server
 const startServer = async () => {
+  const PORT = env.PORT;
+
+  server = app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+    startBillingReminderScheduler();
+  });
+
   try {
-    // Connect Redis FIRST
+    // Do not block HTTP startup on Redis availability.
     await redisClient.connect();
     logger.info("Connected to Redis");
-
-    const PORT = env.PORT;
-
-    server = app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      startBillingReminderScheduler();
-    });
   } catch (err) {
-    logger.error("Startup failure:", err);
-    void shutdown(1);
+    logger.error("Redis startup connection failed. Continuing without Redis:", err);
   }
 };
 
