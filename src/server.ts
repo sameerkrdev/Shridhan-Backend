@@ -3,6 +3,7 @@ import logger from "@/config/logger.js";
 import redisClient from "@/config/redis.js";
 import type { Server } from "node:http";
 import { startBillingReminderScheduler } from "@/services/billingReminderScheduler.js";
+import env from "@/config/dotenv.js";
 
 let server: Server;
 
@@ -67,16 +68,16 @@ redisClient.on("end", () => {
 // Start server
 const startServer = async () => {
   try {
-    const PORT = process.env.PORT;
+    // Connect Redis FIRST
+    await redisClient.connect();
+    logger.info("Connected to Redis");
+
+    const PORT = env.PORT;
 
     server = app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
       startBillingReminderScheduler();
     });
-
-    // Connect Redis FIRST
-    await redisClient.connect();
-    logger.info("Connected to Redis");
   } catch (err) {
     logger.error("Startup failure:", err);
     void shutdown(1);
