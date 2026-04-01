@@ -1,4 +1,3 @@
-import env from "@/config/dotenv.js";
 import app from "@/app.js";
 import logger from "@/config/logger.js";
 import redisClient from "@/config/redis.js";
@@ -68,17 +67,16 @@ redisClient.on("end", () => {
 // Start server
 const startServer = async () => {
   try {
+    const PORT = process.env.PORT;
+
+    server = app.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+      startBillingReminderScheduler();
+    });
+
     // Connect Redis FIRST
     await redisClient.connect();
     logger.info("Connected to Redis");
-
-    const PORT = process.env.PORT;
-
-    // Start HTTP server ONLY after Redis is ready
-    server = app.listen(PORT, () => {
-      logger.info(`Server running on port ${env.PORT}`);
-      startBillingReminderScheduler();
-    });
   } catch (err) {
     logger.error("Startup failure:", err);
     void shutdown(1);
