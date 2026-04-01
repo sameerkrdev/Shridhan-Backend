@@ -42,6 +42,8 @@ const env = cleanEnv(process.env, {
   R2_SECRET_ACCESS_KEY: str(),
   R2_BUCKET_NAME: str(),
   R2_PUBLIC_BASE_URL: str(),
+
+  FRONTEND_URLS: str({ default: "http://localhost:5173" }),
 });
 
 export default env;

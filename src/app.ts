@@ -15,6 +15,7 @@ import misRouter from "@/routes/misRoutes.js";
 import recurringDepositRouter from "@/routes/recurringDepositRoutes.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import env from "@/config/dotenv.js";
 
 const app: express.Express = express();
 app.use("/api/v1/webhooks", webhookRouter);
@@ -23,11 +24,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://mbqgsv18-5173.inc1.devtunnels.ms",
-      "https://mbqgsv18-5801.inc1.devtunnels.ms",
-    ],
+    origin: env.FRONTEND_URLS.split(",").map((url: string) => url.trim()),
     credentials: true,
   }),
 );
