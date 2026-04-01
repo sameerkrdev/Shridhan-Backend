@@ -8,7 +8,7 @@
   "main": "src/server.ts",
   "scripts": {
     "dev": "nodemon",
-    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    "build": "pnpm prisma:generate && tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
