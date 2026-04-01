@@ -81,6 +81,9 @@ importers:
       '@types/express':
         specifier: ^5.0.5
         version: 5.0.6
+      '@types/http-errors':
+        specifier: ^2.0.5
+        version: 2.0.5
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10

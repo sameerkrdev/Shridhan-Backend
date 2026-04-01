@@ -75,7 +75,7 @@ const startServer = async () => {
     const PORT = process.env.PORT;
 
     // Start HTTP server ONLY after Redis is ready
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       logger.info(`Server running on port ${env.PORT}`);
       startBillingReminderScheduler();
     });
