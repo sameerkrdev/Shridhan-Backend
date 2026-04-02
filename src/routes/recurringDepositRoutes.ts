@@ -13,6 +13,7 @@ import {
   listRdProjectTypesSchema,
   payRdSchema,
   previewRdPaymentSchema,
+  updateRdAccountSchema,
   withdrawRdSchema,
 } from "@/zodValidationSchema/recurringDepositValidationSchema.js";
 import {
@@ -26,6 +27,7 @@ import {
   getReferrers,
   pay,
   previewPayment,
+  updateAccount,
   withdraw,
 } from "@/controllers/recurringDepositController.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
@@ -53,6 +55,15 @@ router.get(
   (req, res, next) => getProjectTypes(req as IAuthorizedRequest, res, next),
 );
 
+router.patch(
+  "/:id",
+  auth,
+  billingGate,
+  requirePermission("create", "recurring_deposit"),
+  zodValidatorMiddleware(updateRdAccountSchema),
+  (req, res, next) => updateAccount(req as IAuthorizedRequest, res, next),
+);
+
 router.delete(
   "/project-types/:id",
   auth,
@@ -71,8 +82,12 @@ router.post(
   (req, res, next) => createAccount(req as IAuthorizedRequest, res, next),
 );
 
-router.get("/referrers", auth, billingGate, requirePermission("create", "recurring_deposit"), (req, res, next) =>
-  getReferrers(req as IAuthorizedRequest, res, next),
+router.get(
+  "/referrers",
+  auth,
+  billingGate,
+  requirePermission("create", "recurring_deposit"),
+  (req, res, next) => getReferrers(req as IAuthorizedRequest, res, next),
 );
 
 router.get(

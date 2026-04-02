@@ -492,6 +492,107 @@ export const getFdDetail = async (id: string, societyId: string) => {
   return fixedDeposit;
 };
 
+export const updateFdAccount = async (
+  actor: Prisma.MembershipModel,
+  fixDepositId: string,
+  data: {
+    customer: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    };
+    nominees: {
+      name: string;
+      phone: string;
+      relation?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    }[];
+    documents?: {
+      updates?: Array<{ id: string; displayName: string }>;
+      deleteIds?: string[];
+    };
+  },
+) => {
+  if (!data.nominees.length) {
+    throw createHttpError(400, "At least one nominee is required");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const fixedDeposit = await tx.fixDeposit.findFirst({
+      where: {
+        id: fixDepositId,
+        isDeleted: false,
+        customer: {
+          societyId: actor.societyId,
+          isDeleted: false,
+        },
+      },
+      select: { id: true, customerId: true },
+    });
+
+    if (!fixedDeposit) {
+      throw createHttpError(404, "Fixed deposit account not found");
+    }
+
+    await tx.customer.update({
+      where: { id: fixedDeposit.customerId },
+      data: {
+        fullName: data.customer.fullName,
+        phone: data.customer.phone,
+        email: data.customer.email ?? null,
+        address: data.customer.address ?? null,
+        aadhaar: data.customer.aadhaar ?? null,
+        pan: data.customer.pan ?? null,
+        updatedBy: actor.userId,
+      },
+    });
+
+    await tx.nominee.updateMany({
+      where: { customerId: fixedDeposit.customerId, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+    });
+    await Promise.all(
+      data.nominees.map((nominee) =>
+        tx.nominee.create({
+          data: {
+            ...nominee,
+            relation: nominee.relation ?? null,
+            address: nominee.address ?? null,
+            aadhaar: nominee.aadhaar ?? null,
+            pan: nominee.pan ?? null,
+            customerId: fixedDeposit.customerId,
+            createdBy: actor.userId,
+          },
+        }),
+      ),
+    );
+
+    if (data.documents?.updates?.length) {
+      await Promise.all(
+        data.documents.updates.map((doc) =>
+          tx.serviceDocument.updateMany({
+            where: { id: doc.id, fixDepositId, isDeleted: false },
+            data: { displayName: doc.displayName, updatedBy: actor.userId },
+          }),
+        ),
+      );
+    }
+    if (data.documents?.deleteIds?.length) {
+      await tx.serviceDocument.updateMany({
+        where: { id: { in: data.documents.deleteIds }, fixDepositId, isDeleted: false },
+        data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+      });
+    }
+
+    return getFdDetail(fixDepositId, actor.societyId);
+  });
+};
+
 export const addTransaction = async (
   actor: Prisma.MembershipModel,
   fixDepositId: string,

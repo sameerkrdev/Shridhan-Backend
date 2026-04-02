@@ -11,6 +11,7 @@ import {
   previewRdPayment,
   softDeleteRdAccount,
   softDeleteRdProjectType,
+  updateRdAccount,
   withdrawRd,
 } from "@/services/recurringDepositService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
@@ -65,11 +66,7 @@ export const getProjectTypes = async (
       String((req.query.includeDeleted as string | undefined) ?? "false").toLowerCase() === "true";
     const includeArchived =
       String((req.query.includeArchived as string | undefined) ?? "false").toLowerCase() === "true";
-    const projectTypes = await listRdProjectTypes(
-      actor.societyId,
-      includeDeleted,
-      includeArchived,
-    );
+    const projectTypes = await listRdProjectTypes(actor.societyId, includeDeleted, includeArchived);
     res.json({ projectTypes });
   } catch (error) {
     next(error);
@@ -124,13 +121,7 @@ export const getAccounts = async (req: IAuthorizedRequest, res: Response, next: 
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
 
     const sorting: {
-      sortBy?:
-        | "id"
-        | "customer_name"
-        | "phone"
-        | "monthly_amount"
-        | "maturity_date"
-        | "status";
+      sortBy?: "id" | "customer_name" | "phone" | "monthly_amount" | "maturity_date" | "status";
       sortOrder?: "asc" | "desc";
     } = {};
     if (sortBy) {
@@ -169,6 +160,16 @@ export const getAccountDetail = async (
     const id = getRequiredParam(req.params.id, "id");
     const account = await getRdDetail(id, actor.societyId);
     res.json(account);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateAccount = async (req: IAuthorizedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    res.json(await updateRdAccount(actor, id, req.body as never));
   } catch (error) {
     next(error);
   }

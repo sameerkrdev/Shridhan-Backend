@@ -726,6 +726,83 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
   };
 };
 
+export const updateRdAccount = async (
+  actor: Prisma.MembershipModel,
+  rdId: string,
+  data: {
+    customer: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    };
+    nominees: {
+      name: string;
+      phone: string;
+      relation?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    }[];
+  },
+) => {
+  if (!data.nominees.length) {
+    throw createHttpError(400, "At least one nominee is required");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const rd = await tx.recurringDeposit.findFirst({
+      where: {
+        id: rdId,
+        isDeleted: false,
+        customer: { societyId: actor.societyId, isDeleted: false },
+      },
+      select: { id: true, customerId: true },
+    });
+
+    if (!rd) {
+      throw createHttpError(404, "RD account not found");
+    }
+
+    await tx.customer.update({
+      where: { id: rd.customerId },
+      data: {
+        fullName: data.customer.fullName,
+        phone: data.customer.phone,
+        email: data.customer.email ?? null,
+        address: data.customer.address ?? null,
+        aadhaar: data.customer.aadhaar ?? null,
+        pan: data.customer.pan ?? null,
+        updatedBy: actor.userId,
+      },
+    });
+
+    await tx.nominee.updateMany({
+      where: { customerId: rd.customerId, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+    });
+    await Promise.all(
+      data.nominees.map((nominee) =>
+        tx.nominee.create({
+          data: {
+            ...nominee,
+            relation: nominee.relation ?? null,
+            address: nominee.address ?? null,
+            aadhaar: nominee.aadhaar ?? null,
+            pan: nominee.pan ?? null,
+            customerId: rd.customerId,
+            createdBy: actor.userId,
+          },
+        }),
+      ),
+    );
+
+    return getRdDetail(rdId, actor.societyId);
+  });
+};
+
 export const previewRdPayment = async (
   societyId: string,
   rdId: string,

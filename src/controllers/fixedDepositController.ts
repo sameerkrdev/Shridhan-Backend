@@ -11,6 +11,7 @@ import {
   requestFdDocumentUpload,
   softDeleteProjectType,
   softDeleteFdAccount,
+  updateFdAccount,
   updateFdAccountStatus,
   updateProjectTypeStatus,
 } from "@/services/fixedDepositService.js";
@@ -128,6 +129,20 @@ export const getFixedDepositDetail = async (
     const id = getRequiredParam(req.params.id, "id");
     const fixedDeposit = await getFdDetail(id, actor.societyId);
     res.json(fixedDeposit);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateFixedDepositAccount = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    res.json(await updateFdAccount(actor, id, req.body as never));
   } catch (error) {
     next(error);
   }

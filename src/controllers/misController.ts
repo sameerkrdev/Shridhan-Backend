@@ -13,6 +13,7 @@ import {
   returnMisPrincipal,
   softDeleteMisAccount,
   softDeleteMisProjectType,
+  updateMisAccount,
 } from "@/services/misService.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 import type { NextFunction, Response } from "express";
@@ -140,6 +141,21 @@ export const getAccountDetail = async (
     const actor = assertMembership(req);
     const id = getRequiredParam(req.params.id, "id");
     const account = await getMisDetail(id, actor.societyId);
+    res.json(account);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateAccount = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const account = await updateMisAccount(actor, id, req.body as never);
     res.json(account);
   } catch (error) {
     next(error);
