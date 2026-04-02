@@ -5,11 +5,14 @@ import {
   RdFineCalculationMethod,
   RecurringDepositInstallmentStatus,
   RecurringDepositTransactionType,
+  ActivityActionType,
+  ActivityEntityType,
   type PaymentMethod,
   ServiceStatus,
   type RecurringDepositInstallment,
 } from "@/generated/prisma/client.js";
 import createHttpError from "http-errors";
+import { logActivity } from "@/services/activityService.js";
 import {
   computeDueLines,
   fifoAllocatePayment,
@@ -217,8 +220,9 @@ export const createRdProjectType = async (
   actor: Prisma.MembershipModel,
   data: CreateRdProjectTypeInput,
 ) => {
-  return prisma.recurringDepositProjectType.create({
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const projectType = await tx.recurringDepositProjectType.create({
+      data: {
       name: data.name,
       duration: data.duration,
       minimumMonthlyAmount: new Prisma.Decimal(data.minimumMonthlyAmount),
@@ -239,8 +243,16 @@ export const createRdProjectType = async (
           : null,
       penaltyStartMonth: data.penaltyStartMonth ?? null,
       societyId: actor.societyId,
-      createdBy: actor.userId,
-    },
+        createdBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_PROJECT_TYPE,
+      entityId: projectType.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { name: projectType.name },
+    });
+    return projectType;
   });
 };
 
@@ -276,14 +288,22 @@ export const softDeleteRdProjectType = async (
     throw createHttpError(404, "RD project type not found");
   }
 
-  return prisma.recurringDepositProjectType.update({
-    where: { id: projectTypeId },
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.recurringDepositProjectType.update({
+      where: { id: projectTypeId },
+      data: {
       isDeleted: true,
       deletedAt: new Date(),
       isArchived: true,
       updatedBy: actor.userId,
-    },
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -510,6 +530,12 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
       }
     }
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rd.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { monthlyAmount: monthlyAmount.toString() },
+    });
     return tx.recurringDeposit.findUniqueOrThrow({
       where: { id: rd.id },
       include: {
@@ -799,6 +825,11 @@ export const updateRdAccount = async (
       ),
     );
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rdId,
+      actionType: ActivityActionType.UPDATED,
+    });
     return getRdDetail(rdId, actor.societyId);
   });
 };
@@ -1134,7 +1165,7 @@ export const withdrawRd = async (
       },
     });
 
-    return tx.recurringDeposit.update({
+    const updated = await tx.recurringDeposit.update({
       where: { id: rd.id },
       data: {
         status: ServiceStatus.COMPLETED,
@@ -1150,6 +1181,13 @@ export const withdrawRd = async (
         },
       },
     });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rd.id,
+      actionType: ActivityActionType.WITHDRAWN,
+      metadata: { deductDeferredFinesFromMaturity: data.deductDeferredFinesFromMaturity === true },
+    });
+    return updated;
   });
 };
 
@@ -1174,13 +1212,21 @@ export const softDeleteRdAccount = async (actor: Prisma.MembershipModel, rdId: s
     throw createHttpError(404, "RD account not found");
   }
 
-  return prisma.recurringDeposit.update({
-    where: { id: rdId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: ServiceStatus.CLOSED,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.recurringDeposit.update({
+      where: { id: rdId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: ServiceStatus.CLOSED,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rdId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };

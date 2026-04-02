@@ -27,12 +27,31 @@ model Society {
   memberships                       Membership[]
   monthlyInterestSchemeProjectTypes MonthlyInterestSchemeProjectType[]
   recurringDepositProjectType       RecurringDepositProjectType[]
+  activities                        ActivityLog[]
   planSettings                      SocietyPlanSettings?
   roles                             SocietyRole[]
   subscriptions                     Subscription[]
 
   @@index([subDomainName])
   @@index([status])
+}
+
+model ActivityLog {
+  id                 String             @id @default(uuid())
+  societyId          String
+  entityType         ActivityEntityType
+  entityId           String
+  actionType         ActivityActionType
+  actorMembershipId  String?
+  actorName          String
+  actorPhone         String
+  actorRoleName      String
+  metadata           Json?
+  createdAt          DateTime           @default(now())
+  society            Society            @relation(fields: [societyId], references: [id])
+
+  @@index([societyId, entityType, entityId, createdAt])
+  @@index([societyId, createdAt])
 }
 
 model SocietyPlanSettings {
@@ -690,4 +709,29 @@ enum MisCalculationMethod {
 enum RdFineCalculationMethod {
   FIXED_PER_STREAK_UNIT
   PROPORTIONAL_PER_HUNDRED
+}
+
+enum ActivityEntityType {
+  FD_PROJECT_TYPE
+  MIS_PROJECT_TYPE
+  RD_PROJECT_TYPE
+  FD_ACCOUNT
+  MIS_ACCOUNT
+  RD_ACCOUNT
+}
+
+enum ActivityActionType {
+  CREATED
+  UPDATED
+  DELETED
+  STATUS_UPDATED
+  TRANSACTION_ADDED
+  DEPOSIT_ADDED
+  INTEREST_PAID
+  PRINCIPAL_RETURNED
+  PAYMENT_ADDED
+  WITHDRAWN
+  DOCUMENT_UPLOAD_COMPLETED
+  DOCUMENT_UPDATED
+  DOCUMENT_DELETED
 }

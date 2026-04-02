@@ -14,6 +14,8 @@ import {
   generateMisDocumentUploadUrl,
   getMisDocumentPublicUrl,
 } from "@/services/r2StorageService.js";
+import { logActivity } from "@/services/activityService.js";
+import { ActivityActionType, ActivityEntityType } from "@/generated/prisma/client.js";
 
 interface CreateMisProjectTypeInput {
   name: string;
@@ -164,18 +166,27 @@ export const createMisProjectType = async (
       ? new Prisma.Decimal(data.annualInterestRate ?? 0)
       : null;
 
-  return prisma.monthlyInterestSchemeProjectType.create({
-    data: {
-      name: data.name,
-      duration: data.duration,
-      minimumAmount: new Prisma.Decimal(data.minimumAmount),
-      calculationMethod: data.calculationMethod,
-      monthlyPayoutAmountPerHundred,
-      annualInterestRate,
-      societyId: actor.societyId,
-      createdBy: actor.userId,
-      updatedBy: data.rules ? actor.userId : null,
-    },
+  return prisma.$transaction(async (tx) => {
+    const projectType = await tx.monthlyInterestSchemeProjectType.create({
+      data: {
+        name: data.name,
+        duration: data.duration,
+        minimumAmount: new Prisma.Decimal(data.minimumAmount),
+        calculationMethod: data.calculationMethod,
+        monthlyPayoutAmountPerHundred,
+        annualInterestRate,
+        societyId: actor.societyId,
+        createdBy: actor.userId,
+        updatedBy: data.rules ? actor.userId : null,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_PROJECT_TYPE,
+      entityId: projectType.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { name: projectType.name },
+    });
+    return projectType;
   });
 };
 
@@ -211,14 +222,22 @@ export const softDeleteMisProjectType = async (
     throw createHttpError(404, "MIS project type not found");
   }
 
-  return prisma.monthlyInterestSchemeProjectType.update({
-    where: { id: projectTypeId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isArchived: true,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.monthlyInterestSchemeProjectType.update({
+      where: { id: projectTypeId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        isArchived: true,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -415,6 +434,12 @@ export const createMisAccount = async (
       })),
     );
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: mis.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { depositAmount: depositAmount.toString() },
+    });
     return {
       ...misPayload,
       uploadTargets,
@@ -521,6 +546,12 @@ export const addMisDeposit = async (
       });
     }
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DEPOSIT_ADDED,
+      metadata: { amount: data.amount },
+    });
     return transaction;
   });
 };
@@ -629,6 +660,12 @@ export const payMisInterest = async (
         },
       });
     }
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.INTEREST_PAID,
+      metadata: { months, amount: data.amount },
+    });
     return { success: true };
   });
 };
@@ -694,6 +731,12 @@ export const returnMisPrincipal = async (
       },
     });
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.PRINCIPAL_RETURNED,
+      metadata: { amount: mis.depositAmount.toString() },
+    });
     return transaction;
   });
 };
@@ -953,6 +996,12 @@ export const updateMisAccount = async (
           }),
         ),
       );
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.MIS_ACCOUNT,
+        entityId: mis.id,
+        actionType: ActivityActionType.DOCUMENT_UPDATED,
+        metadata: { count: data.documents.updates.length },
+      });
     }
 
     if (data.documents?.deleteIds?.length) {
@@ -964,8 +1013,19 @@ export const updateMisAccount = async (
         },
         data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
       });
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.MIS_ACCOUNT,
+        entityId: mis.id,
+        actionType: ActivityActionType.DOCUMENT_DELETED,
+        metadata: { count: data.documents.deleteIds.length },
+      });
     }
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: mis.id,
+      actionType: ActivityActionType.UPDATED,
+    });
     return getMisDetail(mis.id, actor.societyId);
   });
 };
@@ -987,14 +1047,22 @@ export const softDeleteMisAccount = async (actor: Prisma.MembershipModel, misId:
     throw createHttpError(404, "MIS account not found");
   }
 
-  return prisma.monthlyInterestScheme.update({
-    where: { id: misId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: ServiceStatus.CLOSED,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.monthlyInterestScheme.update({
+      where: { id: misId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: ServiceStatus.CLOSED,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -1046,6 +1114,14 @@ export const requestMisDocumentUpload = async (
     data.contentType ? { objectKey, contentType: data.contentType } : { objectKey },
   );
 
+  await prisma.$transaction(async (tx) => {
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.UPDATED,
+      metadata: { documentId: document.id, action: "DOCUMENT_REQUESTED" },
+    });
+  });
   return {
     document,
     uploadUrl,
@@ -1077,12 +1153,21 @@ export const completeMisDocumentUpload = async (
     throw createHttpError(404, "MIS document not found");
   }
 
-  return prisma.serviceDocument.update({
-    where: { id: documentId },
-    data: {
-      isUploaded: true,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.serviceDocument.update({
+      where: { id: documentId },
+      data: {
+        isUploaded: true,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DOCUMENT_UPLOAD_COMPLETED,
+      metadata: { documentId },
+    });
+    return updated;
   });
 };
 
