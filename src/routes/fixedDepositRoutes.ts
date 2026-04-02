@@ -14,6 +14,7 @@ import {
   listFdAccountsSchema,
   listProjectTypesSchema,
   requestFdDocumentUploadUrlSchema,
+  updateFdAccountSchema,
   updateFdStatusSchema,
   updateProjectTypeStatusSchema,
 } from "@/zodValidationSchema/fixedDepositValidationSchema.js";
@@ -31,6 +32,7 @@ import {
   getFixedDepositDetail,
   getFixedDeposits,
   markFdDocumentUploaded,
+  updateFixedDepositAccount,
 } from "@/controllers/fixedDepositController.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 
@@ -55,6 +57,15 @@ router.get(
   requirePermission("list", "fixed_deposit"),
   zodValidatorMiddleware(listProjectTypesSchema),
   (req, res, next) => getFdProjectTypes(req as IAuthorizedRequest, res, next),
+);
+
+router.patch(
+  "/:id",
+  auth,
+  billingGate,
+  requirePermission("create", "fixed_deposit"),
+  zodValidatorMiddleware(updateFdAccountSchema),
+  (req, res, next) => updateFixedDepositAccount(req as IAuthorizedRequest, res, next),
 );
 
 router.patch(

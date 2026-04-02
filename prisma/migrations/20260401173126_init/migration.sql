@@ -40,6 +40,12 @@ CREATE TYPE "CustomerAccountType" AS ENUM ('LOAN', 'FIXED_DEPOSIT', 'MONTHLY_INT
 -- CreateEnum
 CREATE TYPE "MaturityCalculationMethod" AS ENUM ('PER_RS_100', 'MULTIPLE_OF_PRINCIPAL');
 
+-- CreateEnum
+CREATE TYPE "MisCalculationMethod" AS ENUM ('MONTHLY_PAYOUT_PER_HUNDRED', 'ANNUAL_INTEREST_RATE');
+
+-- CreateEnum
+CREATE TYPE "RdFineCalculationMethod" AS ENUM ('FIXED_PER_STREAK_UNIT', 'PROPORTIONAL_PER_HUNDRED');
+
 -- CreateTable
 CREATE TABLE "Society" (
     "id" TEXT NOT NULL,
@@ -339,7 +345,9 @@ CREATE TABLE "MonthlyInterestSchemeProjectType" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "minimumAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
-    "monthlyPayoutAmountPerThousand" DECIMAL(14,2) NOT NULL,
+    "calculationMethod" "MisCalculationMethod" NOT NULL DEFAULT 'MONTHLY_PAYOUT_PER_HUNDRED',
+    "monthlyPayoutAmountPerHundred" DECIMAL(14,2),
+    "annualInterestRate" DECIMAL(7,4),
     "duration" INTEGER NOT NULL,
     "version" INTEGER NOT NULL DEFAULT 1,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
@@ -405,6 +413,8 @@ CREATE TABLE "RecurringDepositProjectType" (
     "duration" INTEGER NOT NULL,
     "minimumMonthlyAmount" DECIMAL(14,2) NOT NULL,
     "maturityPerHundred" DECIMAL(14,2) NOT NULL,
+    "fineCalculationMethod" "RdFineCalculationMethod" NOT NULL DEFAULT 'FIXED_PER_STREAK_UNIT',
+    "fixedOverdueFineAmount" DECIMAL(14,2),
     "fineRatePerHundred" DECIMAL(14,2) NOT NULL,
     "graceDays" INTEGER NOT NULL DEFAULT 0,
     "penaltyMultiplier" DECIMAL(14,2),
@@ -429,6 +439,8 @@ CREATE TABLE "RecurringDeposit" (
     "totalPrincipalExpected" DECIMAL(14,2) NOT NULL,
     "expectedMaturityPayout" DECIMAL(14,2) NOT NULL,
     "maturityPerHundredSnapshot" DECIMAL(14,2) NOT NULL,
+    "fineCalculationMethodSnapshot" "RdFineCalculationMethod" NOT NULL,
+    "fixedOverdueFineAmountSnapshot" DECIMAL(14,2),
     "fineRatePerHundredSnapshot" DECIMAL(14,2) NOT NULL,
     "graceDaysSnapshot" INTEGER NOT NULL,
     "penaltyMultiplierSnapshot" DECIMAL(14,2),

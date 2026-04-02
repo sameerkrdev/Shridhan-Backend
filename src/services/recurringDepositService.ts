@@ -5,11 +5,14 @@ import {
   RdFineCalculationMethod,
   RecurringDepositInstallmentStatus,
   RecurringDepositTransactionType,
+  ActivityActionType,
+  ActivityEntityType,
   type PaymentMethod,
   ServiceStatus,
   type RecurringDepositInstallment,
 } from "@/generated/prisma/client.js";
 import createHttpError from "http-errors";
+import { logActivity } from "@/services/activityService.js";
 import {
   computeDueLines,
   fifoAllocatePayment,
@@ -35,7 +38,7 @@ interface CreateRdProjectTypeInput {
 }
 
 interface CreateRdAccountInput {
-  referrerMembershipId?: string;
+  referrerMembershipId: string;
   customer: {
     fullName: string;
     phone: string;
@@ -217,8 +220,9 @@ export const createRdProjectType = async (
   actor: Prisma.MembershipModel,
   data: CreateRdProjectTypeInput,
 ) => {
-  return prisma.recurringDepositProjectType.create({
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const projectType = await tx.recurringDepositProjectType.create({
+      data: {
       name: data.name,
       duration: data.duration,
       minimumMonthlyAmount: new Prisma.Decimal(data.minimumMonthlyAmount),
@@ -239,8 +243,16 @@ export const createRdProjectType = async (
           : null,
       penaltyStartMonth: data.penaltyStartMonth ?? null,
       societyId: actor.societyId,
-      createdBy: actor.userId,
-    },
+        createdBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_PROJECT_TYPE,
+      entityId: projectType.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { name: projectType.name },
+    });
+    return projectType;
   });
 };
 
@@ -276,14 +288,22 @@ export const softDeleteRdProjectType = async (
     throw createHttpError(404, "RD project type not found");
   }
 
-  return prisma.recurringDepositProjectType.update({
-    where: { id: projectTypeId },
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.recurringDepositProjectType.update({
+      where: { id: projectTypeId },
+      data: {
       isDeleted: true,
       deletedAt: new Date(),
       isArchived: true,
       updatedBy: actor.userId,
-    },
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -314,21 +334,20 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
       throw createHttpError(404, "RD project type not found for this society");
     }
 
-    const linkedMembershipId = data.referrerMembershipId ?? actor.id;
-    if (data.referrerMembershipId) {
-      const referrerMembership = await tx.membership.findFirst({
-        where: {
-          id: data.referrerMembershipId,
-          societyId: actor.societyId,
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
+    const referrerMembership = await tx.membership.findFirst({
+      where: {
+        id: data.referrerMembershipId,
+        societyId: actor.societyId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
 
-      if (!referrerMembership) {
-        throw createHttpError(404, "Selected referrer member not found in this society");
-      }
+    if (!referrerMembership) {
+      throw createHttpError(404, "Selected referrer member not found in this society");
     }
+
+    const linkedMembershipId = data.referrerMembershipId;
 
     const monthlyAmount = new Prisma.Decimal(data.rd.monthlyAmount);
     if (monthlyAmount.lt(projectType.minimumMonthlyAmount)) {
@@ -511,6 +530,12 @@ export const createRdAccount = async (actor: Prisma.MembershipModel, data: Creat
       }
     }
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rd.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { monthlyAmount: monthlyAmount.toString() },
+    });
     return tx.recurringDeposit.findUniqueOrThrow({
       where: { id: rd.id },
       include: {
@@ -725,6 +750,88 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
       totalPrincipalExpected: rd.totalPrincipalExpected.toString(),
     },
   };
+};
+
+export const updateRdAccount = async (
+  actor: Prisma.MembershipModel,
+  rdId: string,
+  data: {
+    customer: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    };
+    nominees: {
+      name: string;
+      phone: string;
+      relation?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    }[];
+  },
+) => {
+  if (!data.nominees.length) {
+    throw createHttpError(400, "At least one nominee is required");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const rd = await tx.recurringDeposit.findFirst({
+      where: {
+        id: rdId,
+        isDeleted: false,
+        customer: { societyId: actor.societyId, isDeleted: false },
+      },
+      select: { id: true, customerId: true },
+    });
+
+    if (!rd) {
+      throw createHttpError(404, "RD account not found");
+    }
+
+    await tx.customer.update({
+      where: { id: rd.customerId },
+      data: {
+        fullName: data.customer.fullName,
+        phone: data.customer.phone,
+        email: data.customer.email ?? null,
+        address: data.customer.address ?? null,
+        aadhaar: data.customer.aadhaar ?? null,
+        pan: data.customer.pan ?? null,
+        updatedBy: actor.userId,
+      },
+    });
+
+    await tx.nominee.updateMany({
+      where: { customerId: rd.customerId, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+    });
+    await Promise.all(
+      data.nominees.map((nominee) =>
+        tx.nominee.create({
+          data: {
+            ...nominee,
+            relation: nominee.relation ?? null,
+            address: nominee.address ?? null,
+            aadhaar: nominee.aadhaar ?? null,
+            pan: nominee.pan ?? null,
+            customerId: rd.customerId,
+            createdBy: actor.userId,
+          },
+        }),
+      ),
+    );
+
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rdId,
+      actionType: ActivityActionType.UPDATED,
+    });
+    return getRdDetail(rdId, actor.societyId);
+  });
 };
 
 export const previewRdPayment = async (
@@ -1058,7 +1165,7 @@ export const withdrawRd = async (
       },
     });
 
-    return tx.recurringDeposit.update({
+    const updated = await tx.recurringDeposit.update({
       where: { id: rd.id },
       data: {
         status: ServiceStatus.COMPLETED,
@@ -1074,6 +1181,13 @@ export const withdrawRd = async (
         },
       },
     });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rd.id,
+      actionType: ActivityActionType.WITHDRAWN,
+      metadata: { deductDeferredFinesFromMaturity: data.deductDeferredFinesFromMaturity === true },
+    });
+    return updated;
   });
 };
 
@@ -1098,13 +1212,21 @@ export const softDeleteRdAccount = async (actor: Prisma.MembershipModel, rdId: s
     throw createHttpError(404, "RD account not found");
   }
 
-  return prisma.recurringDeposit.update({
-    where: { id: rdId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: ServiceStatus.CLOSED,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.recurringDeposit.update({
+      where: { id: rdId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: ServiceStatus.CLOSED,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.RD_ACCOUNT,
+      entityId: rdId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };

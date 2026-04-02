@@ -80,7 +80,7 @@ export const deleteRdProjectTypeSchema = z.object({
 export const createRdAccountSchema = z.object({
   body: z
     .object({
-      referrerMembershipId: cuidSchema.optional(),
+      referrerMembershipId: cuidSchema,
       customer: z.object({
         fullName: z.string().trim().min(2, "Customer name is required").max(150),
         phone: phoneSchema,
@@ -185,6 +185,46 @@ export const getRdDetailSchema = z.object({
     id: uuidSchema,
   }),
 });
+
+export const updateRdAccountSchema = z
+  .object({
+    params: z.object({
+      id: uuidSchema,
+    }),
+    body: z.object({
+      customer: z.object({
+        fullName: z.string().trim().min(2, "Customer name is required").max(150),
+        phone: phoneSchema,
+        email: emptyStringToUndefined(z.email("Invalid customer email")),
+        address: z.string().max(500).optional(),
+        aadhaar: emptyStringToUndefined(aadhaarSchema),
+        pan: panToUppercaseOptionalSchema,
+      }),
+      nominees: z
+        .array(
+          z.object({
+            name: z.string().trim().min(2, "Nominee name is required").max(150),
+            phone: phoneSchema,
+            relation: relationSchema.optional(),
+            address: z.string().max(500).optional(),
+            aadhaar: emptyStringToUndefined(aadhaarSchema),
+            pan: panToUppercaseOptionalSchema,
+          }),
+        )
+        .min(1, "At least one nominee is required")
+        .max(5, "You can add up to 5 nominees only"),
+    }),
+  })
+  .refine(
+    (payload) => {
+      const phones = payload.body.nominees.map((nominee) => nominee.phone);
+      return new Set(phones).size === phones.length;
+    },
+    {
+      message: "Nominee phone numbers must be unique",
+      path: ["body", "nominees"],
+    },
+  );
 
 export const listRdAccountsSchema = z.object({
   query: z.object({

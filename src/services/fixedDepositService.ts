@@ -14,6 +14,8 @@ import {
   generateFdDocumentUploadUrl,
   getFdDocumentPublicUrl,
 } from "@/services/r2StorageService.js";
+import { logActivity } from "@/services/activityService.js";
+import { ActivityActionType, ActivityEntityType } from "@/generated/prisma/client.js";
 
 const assertMembership = (req: { membership?: Prisma.MembershipModel }) => {
   if (!req.membership) {
@@ -53,19 +55,28 @@ export const createProjectType = async (
   },
 ) => {
   const isPerRs100 = data.maturityCalculationMethod === "PER_RS_100";
-  return prisma.fixedDepositProjectType.create({
-    data: {
-      name: data.name,
-      duration: data.duration,
-      minimumAmount: new Prisma.Decimal(data.minimumAmount),
-      maturityCalculationMethod: data.maturityCalculationMethod,
-      maturityAmountPerHundred: isPerRs100
-        ? new Prisma.Decimal(data.maturityValue)
-        : new Prisma.Decimal(0),
-      maturityMultiple: isPerRs100 ? new Prisma.Decimal(0) : new Prisma.Decimal(data.maturityValue),
-      societyId: actor.societyId,
-      createdBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const projectType = await tx.fixedDepositProjectType.create({
+      data: {
+        name: data.name,
+        duration: data.duration,
+        minimumAmount: new Prisma.Decimal(data.minimumAmount),
+        maturityCalculationMethod: data.maturityCalculationMethod,
+        maturityAmountPerHundred: isPerRs100
+          ? new Prisma.Decimal(data.maturityValue)
+          : new Prisma.Decimal(0),
+        maturityMultiple: isPerRs100 ? new Prisma.Decimal(0) : new Prisma.Decimal(data.maturityValue),
+        societyId: actor.societyId,
+        createdBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_PROJECT_TYPE,
+      entityId: projectType.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { name: projectType.name },
+    });
+    return projectType;
   });
 };
 
@@ -97,12 +108,21 @@ export const updateProjectTypeStatus = async (
     throw createHttpError(404, "Fixed deposit project type not found");
   }
 
-  return prisma.fixedDepositProjectType.update({
-    where: { id: projectTypeId },
-    data: {
-      isArchived: status === "SUSPENDED",
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.fixedDepositProjectType.update({
+      where: { id: projectTypeId },
+      data: {
+        isArchived: status === "SUSPENDED",
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.STATUS_UPDATED,
+      metadata: { status },
+    });
+    return updated;
   });
 };
 
@@ -123,21 +143,29 @@ export const softDeleteProjectType = async (
     throw createHttpError(404, "Fixed deposit project type not found");
   }
 
-  return prisma.fixedDepositProjectType.update({
-    where: { id: projectTypeId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isArchived: true,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.fixedDepositProjectType.update({
+      where: { id: projectTypeId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        isArchived: true,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
 export const createFdAccount = async (
   actor: Prisma.MembershipModel,
   data: {
-    referrerMembershipId?: string;
+    referrerMembershipId: string;
     customer: {
       fullName: string;
       phone: string;
@@ -227,22 +255,20 @@ export const createFdAccount = async (
     const initialPaymentAmountDecimal = new Prisma.Decimal(initialPaymentAmount);
     const maturityAmount = computeFdMaturityAmount(depositAmount, projectType);
     const maturityDate = calculateMaturityDate(new Date(data.fd.startDate), projectType.duration);
-    const linkedMembershipId = data.referrerMembershipId ?? actor.id;
+    const referrerMembership = await tx.membership.findFirst({
+      where: {
+        id: data.referrerMembershipId,
+        societyId: actor.societyId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
 
-    if (data.referrerMembershipId) {
-      const referrerMembership = await tx.membership.findFirst({
-        where: {
-          id: data.referrerMembershipId,
-          societyId: actor.societyId,
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
-
-      if (!referrerMembership) {
-        throw createHttpError(404, "Selected referrer member not found in this society");
-      }
+    if (!referrerMembership) {
+      throw createHttpError(404, "Selected referrer member not found in this society");
     }
+
+    const linkedMembershipId = data.referrerMembershipId;
 
     const customer = await tx.customer.create({
       data: {
@@ -357,6 +383,12 @@ export const createFdAccount = async (
       })),
     );
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_ACCOUNT,
+      entityId: fixedDeposit.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { principalAmount: depositAmount.toString() },
+    });
     return {
       ...fdPayload,
       uploadTargets,
@@ -494,6 +526,112 @@ export const getFdDetail = async (id: string, societyId: string) => {
   return fixedDeposit;
 };
 
+export const updateFdAccount = async (
+  actor: Prisma.MembershipModel,
+  fixDepositId: string,
+  data: {
+    customer: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    };
+    nominees: {
+      name: string;
+      phone: string;
+      relation?: string;
+      address?: string;
+      aadhaar?: string;
+      pan?: string;
+    }[];
+    documents?: {
+      updates?: Array<{ id: string; displayName: string }>;
+      deleteIds?: string[];
+    };
+  },
+) => {
+  if (!data.nominees.length) {
+    throw createHttpError(400, "At least one nominee is required");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const fixedDeposit = await tx.fixDeposit.findFirst({
+      where: {
+        id: fixDepositId,
+        isDeleted: false,
+        customer: {
+          societyId: actor.societyId,
+          isDeleted: false,
+        },
+      },
+      select: { id: true, customerId: true },
+    });
+
+    if (!fixedDeposit) {
+      throw createHttpError(404, "Fixed deposit account not found");
+    }
+
+    await tx.customer.update({
+      where: { id: fixedDeposit.customerId },
+      data: {
+        fullName: data.customer.fullName,
+        phone: data.customer.phone,
+        email: data.customer.email ?? null,
+        address: data.customer.address ?? null,
+        aadhaar: data.customer.aadhaar ?? null,
+        pan: data.customer.pan ?? null,
+        updatedBy: actor.userId,
+      },
+    });
+
+    await tx.nominee.updateMany({
+      where: { customerId: fixedDeposit.customerId, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+    });
+    await Promise.all(
+      data.nominees.map((nominee) =>
+        tx.nominee.create({
+          data: {
+            ...nominee,
+            relation: nominee.relation ?? null,
+            address: nominee.address ?? null,
+            aadhaar: nominee.aadhaar ?? null,
+            pan: nominee.pan ?? null,
+            customerId: fixedDeposit.customerId,
+            createdBy: actor.userId,
+          },
+        }),
+      ),
+    );
+
+    if (data.documents?.updates?.length) {
+      await Promise.all(
+        data.documents.updates.map((doc) =>
+          tx.serviceDocument.updateMany({
+            where: { id: doc.id, fixDepositId, isDeleted: false },
+            data: { displayName: doc.displayName, updatedBy: actor.userId },
+          }),
+        ),
+      );
+    }
+    if (data.documents?.deleteIds?.length) {
+      await tx.serviceDocument.updateMany({
+        where: { id: { in: data.documents.deleteIds }, fixDepositId, isDeleted: false },
+        data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+      });
+    }
+
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_ACCOUNT,
+      entityId: fixDepositId,
+      actionType: ActivityActionType.UPDATED,
+    });
+    return getFdDetail(fixDepositId, actor.societyId);
+  });
+};
+
 export const addTransaction = async (
   actor: Prisma.MembershipModel,
   fixDepositId: string,
@@ -570,19 +708,28 @@ export const addTransaction = async (
     }
   }
 
-  return prisma.fixDepositTransaction.create({
-    data: {
-      type: data.type,
-      amount: incomingAmount,
-      month: data.month ?? null,
-      paymentMethod: data.paymentMethod ?? null,
-      transactionId: data.transactionId ?? null,
-      upiId: data.upiId ?? null,
-      bankName: data.bankName ?? null,
-      chequeNumber: data.chequeNumber ?? null,
-      fixDepositId,
-      createdBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const transaction = await tx.fixDepositTransaction.create({
+      data: {
+        type: data.type,
+        amount: incomingAmount,
+        month: data.month ?? null,
+        paymentMethod: data.paymentMethod ?? null,
+        transactionId: data.transactionId ?? null,
+        upiId: data.upiId ?? null,
+        bankName: data.bankName ?? null,
+        chequeNumber: data.chequeNumber ?? null,
+        fixDepositId,
+        createdBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_ACCOUNT,
+      entityId: fixDepositId,
+      actionType: ActivityActionType.TRANSACTION_ADDED,
+      metadata: { type: data.type, amount: data.amount },
+    });
+    return transaction;
   });
 };
 
@@ -607,12 +754,21 @@ export const updateFdAccountStatus = async (
     throw createHttpError(404, "Fixed deposit account not found");
   }
 
-  return prisma.fixDeposit.update({
-    where: { id: fixDepositId },
-    data: {
-      status,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.fixDeposit.update({
+      where: { id: fixDepositId },
+      data: {
+        status,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_ACCOUNT,
+      entityId: fixDepositId,
+      actionType: ActivityActionType.STATUS_UPDATED,
+      metadata: { status },
+    });
+    return updated;
   });
 };
 
@@ -633,14 +789,22 @@ export const softDeleteFdAccount = async (actor: Prisma.MembershipModel, fixDepo
     throw createHttpError(404, "Fixed deposit account not found");
   }
 
-  return prisma.fixDeposit.update({
-    where: { id: fixDepositId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: ServiceStatus.CLOSED,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.fixDeposit.update({
+      where: { id: fixDepositId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: ServiceStatus.CLOSED,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.FD_ACCOUNT,
+      entityId: fixDepositId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 

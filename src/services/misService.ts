@@ -14,6 +14,8 @@ import {
   generateMisDocumentUploadUrl,
   getMisDocumentPublicUrl,
 } from "@/services/r2StorageService.js";
+import { logActivity } from "@/services/activityService.js";
+import { ActivityActionType, ActivityEntityType } from "@/generated/prisma/client.js";
 
 interface CreateMisProjectTypeInput {
   name: string;
@@ -26,7 +28,7 @@ interface CreateMisProjectTypeInput {
 }
 
 interface CreateMisAccountInput {
-  referrerMembershipId?: string;
+  referrerMembershipId: string;
   customer: {
     fullName: string;
     phone: string;
@@ -70,6 +72,29 @@ interface PaymentMetaInput {
   upiId?: string;
   chequeNumber?: string;
   bankName?: string;
+}
+
+interface UpdateMisAccountInput {
+  customer: {
+    fullName: string;
+    phone: string;
+    email?: string;
+    address?: string;
+    aadhaar?: string;
+    pan?: string;
+  };
+  nominees: {
+    name: string;
+    phone: string;
+    relation?: string;
+    address?: string;
+    aadhaar?: string;
+    pan?: string;
+  }[];
+  documents?: {
+    updates?: Array<{ id: string; displayName: string }>;
+    deleteIds?: string[];
+  };
 }
 
 const assertMembership = (req: { membership?: Prisma.MembershipModel }) => {
@@ -141,18 +166,27 @@ export const createMisProjectType = async (
       ? new Prisma.Decimal(data.annualInterestRate ?? 0)
       : null;
 
-  return prisma.monthlyInterestSchemeProjectType.create({
-    data: {
-      name: data.name,
-      duration: data.duration,
-      minimumAmount: new Prisma.Decimal(data.minimumAmount),
-      calculationMethod: data.calculationMethod,
-      monthlyPayoutAmountPerHundred,
-      annualInterestRate,
-      societyId: actor.societyId,
-      createdBy: actor.userId,
-      updatedBy: data.rules ? actor.userId : null,
-    },
+  return prisma.$transaction(async (tx) => {
+    const projectType = await tx.monthlyInterestSchemeProjectType.create({
+      data: {
+        name: data.name,
+        duration: data.duration,
+        minimumAmount: new Prisma.Decimal(data.minimumAmount),
+        calculationMethod: data.calculationMethod,
+        monthlyPayoutAmountPerHundred,
+        annualInterestRate,
+        societyId: actor.societyId,
+        createdBy: actor.userId,
+        updatedBy: data.rules ? actor.userId : null,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_PROJECT_TYPE,
+      entityId: projectType.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { name: projectType.name },
+    });
+    return projectType;
   });
 };
 
@@ -188,14 +222,22 @@ export const softDeleteMisProjectType = async (
     throw createHttpError(404, "MIS project type not found");
   }
 
-  return prisma.monthlyInterestSchemeProjectType.update({
-    where: { id: projectTypeId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isArchived: true,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.monthlyInterestSchemeProjectType.update({
+      where: { id: projectTypeId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        isArchived: true,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_PROJECT_TYPE,
+      entityId: projectTypeId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -232,21 +274,20 @@ export const createMisAccount = async (
       throw createHttpError(404, "MIS project type not found for this society");
     }
 
-    const linkedMembershipId = data.referrerMembershipId ?? actor.id;
-    if (data.referrerMembershipId) {
-      const referrerMembership = await tx.membership.findFirst({
-        where: {
-          id: data.referrerMembershipId,
-          societyId: actor.societyId,
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
+    const referrerMembership = await tx.membership.findFirst({
+      where: {
+        id: data.referrerMembershipId,
+        societyId: actor.societyId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
 
-      if (!referrerMembership) {
-        throw createHttpError(404, "Selected referrer member not found in this society");
-      }
+    if (!referrerMembership) {
+      throw createHttpError(404, "Selected referrer member not found in this society");
     }
+
+    const linkedMembershipId = data.referrerMembershipId;
 
     const customer = await tx.customer.create({
       data: {
@@ -393,6 +434,12 @@ export const createMisAccount = async (
       })),
     );
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: mis.id,
+      actionType: ActivityActionType.CREATED,
+      metadata: { depositAmount: depositAmount.toString() },
+    });
     return {
       ...misPayload,
       uploadTargets,
@@ -499,6 +546,12 @@ export const addMisDeposit = async (
       });
     }
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DEPOSIT_ADDED,
+      metadata: { amount: data.amount },
+    });
     return transaction;
   });
 };
@@ -532,11 +585,12 @@ export const payMisInterest = async (
           where: {
             isDeleted: false,
             type: TransactionType.INTEREST_PAYOUT,
-            isExpected: false,
           },
           select: {
+            id: true,
             amount: true,
             month: true,
+            isExpected: true,
           },
         },
       },
@@ -553,6 +607,9 @@ export const payMisInterest = async (
     if (months.length === 0) {
       throw createHttpError(400, "Month information is required");
     }
+    if (new Set(months).size !== months.length) {
+      throw createHttpError(400, "Duplicate month values are not allowed");
+    }
 
     for (const month of months) {
       if (month < 1 || month > mis.projectType.duration) {
@@ -560,78 +617,55 @@ export const payMisInterest = async (
       }
     }
 
-    const paidByMonth = new Map<number, Prisma.Decimal>();
+    const expectedRowsByMonth = new Map<number, { id: string; isExpected: boolean; amount: Prisma.Decimal }>();
     for (const transaction of mis.transactions) {
       if (transaction.month === null) continue;
-      const current = paidByMonth.get(transaction.month) ?? new Prisma.Decimal(0);
-      paidByMonth.set(transaction.month, current.add(transaction.amount));
+      if (transaction.isExpected) {
+        expectedRowsByMonth.set(transaction.month, {
+          id: transaction.id,
+          isExpected: transaction.isExpected,
+          amount: transaction.amount,
+        });
+      }
     }
 
-    if (months.length > 1) {
-      const requiredAmount = mis.monthlyInterest.mul(months.length);
-      if (!new Prisma.Decimal(data.amount).eq(requiredAmount)) {
-        throw createHttpError(
-          400,
-          `Amount must equal monthly interest x month count (${requiredAmount.toFixed(2)})`,
-        );
-      }
-      for (const month of months) {
-        const paid = paidByMonth.get(month) ?? new Prisma.Decimal(0);
-        const remaining = mis.monthlyInterest.sub(paid);
-        if (remaining.lt(mis.monthlyInterest)) {
-          throw createHttpError(
-            400,
-            `Month ${month} already has a partial/full payment. Use single-month payment for split payout.`,
-          );
-        }
-      }
-    } else {
-      const month = months[0]!;
-      const paid = paidByMonth.get(month) ?? new Prisma.Decimal(0);
-      const remaining = mis.monthlyInterest.sub(paid);
-      if (remaining.lte(0)) {
+    for (const month of months) {
+      if (!expectedRowsByMonth.has(month)) {
         throw createHttpError(400, `Month ${month} interest is already fully paid`);
       }
-      if (new Prisma.Decimal(data.amount).gt(remaining)) {
-        throw createHttpError(
-          400,
-          `Interest amount cannot exceed remaining month payout (${remaining.toFixed(2)})`,
-        );
-      }
     }
 
-    const rows =
-      months.length > 1
-        ? months.map((month) => ({
-            type: TransactionType.INTEREST_PAYOUT,
-            isExpected: false,
-            month,
-            amount: mis.monthlyInterest,
-            paymentMethod: data.paymentMethod ?? null,
-            transactionId: data.transactionId ?? null,
-            upiId: data.upiId ?? null,
-            chequeNumber: data.chequeNumber ?? null,
-            bankName: data.bankName ?? null,
-            monthlyInterestSchemeId: mis.id,
-            createdBy: actor.userId,
-          }))
-        : [
-            {
-              type: TransactionType.INTEREST_PAYOUT,
-              isExpected: false,
-              month: months[0]!,
-              amount: new Prisma.Decimal(data.amount),
-              paymentMethod: data.paymentMethod ?? null,
-              transactionId: data.transactionId ?? null,
-              upiId: data.upiId ?? null,
-              chequeNumber: data.chequeNumber ?? null,
-              bankName: data.bankName ?? null,
-              monthlyInterestSchemeId: mis.id,
-              createdBy: actor.userId,
-            },
-          ];
+    const requiredAmount = mis.monthlyInterest.mul(months.length);
+    const requestedAmount = new Prisma.Decimal(data.amount);
+    if (!requestedAmount.eq(requiredAmount)) {
+      throw createHttpError(
+        400,
+        `Amount must equal monthly interest x month count (${requiredAmount.toFixed(2)})`,
+      );
+    }
 
-    await tx.monthlyInterestSchemeTransaction.createMany({ data: rows });
+    for (const month of months) {
+      const expectedRow = expectedRowsByMonth.get(month)!;
+      await tx.monthlyInterestSchemeTransaction.update({
+        where: { id: expectedRow.id },
+        data: {
+          isExpected: false,
+          amount: mis.monthlyInterest,
+          paymentMethod: data.paymentMethod ?? null,
+          transactionId: data.transactionId ?? null,
+          upiId: data.upiId ?? null,
+          chequeNumber: data.chequeNumber ?? null,
+          bankName: data.bankName ?? null,
+          updatedBy: actor.userId,
+        },
+      });
+    }
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.INTEREST_PAID,
+      metadata: { months, amount: data.amount },
+    });
     return { success: true };
   });
 };
@@ -697,6 +731,12 @@ export const returnMisPrincipal = async (
       },
     });
 
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.PRINCIPAL_RETURNED,
+      metadata: { amount: mis.depositAmount.toString() },
+    });
     return transaction;
   });
 };
@@ -880,6 +920,116 @@ export const getMisDetail = async (misId: string, societyId: string) => {
   };
 };
 
+export const updateMisAccount = async (
+  actor: Prisma.MembershipModel,
+  misId: string,
+  data: UpdateMisAccountInput,
+) => {
+  if (!data.nominees.length) {
+    throw createHttpError(400, "At least one nominee is required");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const mis = await tx.monthlyInterestScheme.findFirst({
+      where: {
+        id: misId,
+        isDeleted: false,
+        customer: {
+          societyId: actor.societyId,
+          isDeleted: false,
+        },
+      },
+      include: {
+        customer: true,
+      },
+    });
+
+    if (!mis) {
+      throw createHttpError(404, "MIS account not found");
+    }
+
+    await tx.customer.update({
+      where: { id: mis.customerId },
+      data: {
+        fullName: data.customer.fullName,
+        phone: data.customer.phone,
+        email: data.customer.email ?? null,
+        address: data.customer.address ?? null,
+        aadhaar: data.customer.aadhaar ?? null,
+        pan: data.customer.pan ?? null,
+        updatedBy: actor.userId,
+      },
+    });
+
+    await tx.nominee.updateMany({
+      where: { customerId: mis.customerId, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+    });
+
+    await Promise.all(
+      data.nominees.map((nominee) =>
+        tx.nominee.create({
+          data: {
+            name: nominee.name,
+            phone: nominee.phone,
+            relation: nominee.relation ?? null,
+            address: nominee.address ?? null,
+            aadhaar: nominee.aadhaar ?? null,
+            pan: nominee.pan ?? null,
+            customerId: mis.customerId,
+            createdBy: actor.userId,
+          },
+        }),
+      ),
+    );
+
+    if (data.documents?.updates?.length) {
+      await Promise.all(
+        data.documents.updates.map((doc) =>
+          tx.serviceDocument.updateMany({
+            where: {
+              id: doc.id,
+              monthlyInterestSchemeId: mis.id,
+              isDeleted: false,
+            },
+            data: { displayName: doc.displayName, updatedBy: actor.userId },
+          }),
+        ),
+      );
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.MIS_ACCOUNT,
+        entityId: mis.id,
+        actionType: ActivityActionType.DOCUMENT_UPDATED,
+        metadata: { count: data.documents.updates.length },
+      });
+    }
+
+    if (data.documents?.deleteIds?.length) {
+      await tx.serviceDocument.updateMany({
+        where: {
+          id: { in: data.documents.deleteIds },
+          monthlyInterestSchemeId: mis.id,
+          isDeleted: false,
+        },
+        data: { isDeleted: true, deletedAt: new Date(), updatedBy: actor.userId },
+      });
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.MIS_ACCOUNT,
+        entityId: mis.id,
+        actionType: ActivityActionType.DOCUMENT_DELETED,
+        metadata: { count: data.documents.deleteIds.length },
+      });
+    }
+
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: mis.id,
+      actionType: ActivityActionType.UPDATED,
+    });
+    return getMisDetail(mis.id, actor.societyId);
+  });
+};
+
 export const softDeleteMisAccount = async (actor: Prisma.MembershipModel, misId: string) => {
   const mis = await prisma.monthlyInterestScheme.findFirst({
     where: {
@@ -897,14 +1047,22 @@ export const softDeleteMisAccount = async (actor: Prisma.MembershipModel, misId:
     throw createHttpError(404, "MIS account not found");
   }
 
-  return prisma.monthlyInterestScheme.update({
-    where: { id: misId },
-    data: {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: ServiceStatus.CLOSED,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.monthlyInterestScheme.update({
+      where: { id: misId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: ServiceStatus.CLOSED,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DELETED,
+    });
+    return deleted;
   });
 };
 
@@ -956,6 +1114,14 @@ export const requestMisDocumentUpload = async (
     data.contentType ? { objectKey, contentType: data.contentType } : { objectKey },
   );
 
+  await prisma.$transaction(async (tx) => {
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.UPDATED,
+      metadata: { documentId: document.id, action: "DOCUMENT_REQUESTED" },
+    });
+  });
   return {
     document,
     uploadUrl,
@@ -987,12 +1153,21 @@ export const completeMisDocumentUpload = async (
     throw createHttpError(404, "MIS document not found");
   }
 
-  return prisma.serviceDocument.update({
-    where: { id: documentId },
-    data: {
-      isUploaded: true,
-      updatedBy: actor.userId,
-    },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.serviceDocument.update({
+      where: { id: documentId },
+      data: {
+        isUploaded: true,
+        updatedBy: actor.userId,
+      },
+    });
+    await logActivity(tx, actor, {
+      entityType: ActivityEntityType.MIS_ACCOUNT,
+      entityId: misId,
+      actionType: ActivityActionType.DOCUMENT_UPLOAD_COMPLETED,
+      metadata: { documentId },
+    });
+    return updated;
   });
 };
 

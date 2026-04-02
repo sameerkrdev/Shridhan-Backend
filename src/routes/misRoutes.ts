@@ -14,6 +14,7 @@ import {
   payMisInterestSchema,
   requestMisDocumentUploadUrlSchema,
   returnMisPrincipalSchema,
+  updateMisAccountSchema,
 } from "@/zodValidationSchema/misValidationSchema.js";
 import {
   addDeposit,
@@ -29,6 +30,7 @@ import {
   markMisDocumentUploaded as markMisDocumentUploadedController,
   payInterest,
   returnPrincipal,
+  updateAccount,
 } from "@/controllers/misController.js";
 import type { IAuthorizedRequest } from "@/types/authType.js";
 
@@ -53,6 +55,15 @@ router.get(
   requirePermission("list", "mis"),
   zodValidatorMiddleware(listMisProjectTypesSchema),
   (req, res, next) => getProjectTypes(req as IAuthorizedRequest, res, next),
+);
+
+router.patch(
+  "/:id",
+  auth,
+  billingGate,
+  requirePermission("create", "mis"),
+  zodValidatorMiddleware(updateMisAccountSchema),
+  (req, res, next) => updateAccount(req as IAuthorizedRequest, res, next),
 );
 
 router.delete(

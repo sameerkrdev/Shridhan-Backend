@@ -81,7 +81,7 @@ export const listMisProjectTypesSchema = z.object({
 export const createMisAccountSchema = z.object({
   body: z
     .object({
-      referrerMembershipId: cuidSchema.optional(),
+      referrerMembershipId: cuidSchema,
       customer: z.object({
         fullName: z.string().trim().min(2, "Customer name is required").max(150),
         phone: phoneSchema,
@@ -351,6 +351,59 @@ export const getMisDetailSchema = z.object({
   params: z.object({
     id: uuidSchema,
   }),
+});
+
+export const updateMisAccountSchema = z.object({
+  params: z.object({
+    id: uuidSchema,
+  }),
+  body: z
+    .object({
+      customer: z.object({
+        fullName: z.string().trim().min(2, "Customer name is required").max(150),
+        phone: phoneSchema,
+        email: emptyStringToUndefined(z.email("Invalid customer email")),
+        address: z.string().max(500).optional(),
+        aadhaar: emptyStringToUndefined(aadhaarSchema),
+        pan: panToUppercaseOptionalSchema,
+      }),
+      nominees: z
+        .array(
+          z.object({
+            name: z.string().trim().min(2, "Nominee name is required").max(150),
+            phone: phoneSchema,
+            relation: relationSchema.optional(),
+            address: z.string().max(500).optional(),
+            aadhaar: emptyStringToUndefined(aadhaarSchema),
+            pan: panToUppercaseOptionalSchema,
+          }),
+        )
+        .min(1, "At least one nominee is required")
+        .max(5, "You can add up to 5 nominees only"),
+      documents: z
+        .object({
+          updates: z
+            .array(
+              z.object({
+                id: uuidSchema,
+                displayName: z.string().trim().min(1).max(255),
+              }),
+            )
+            .optional(),
+          deleteIds: z.array(uuidSchema).optional(),
+        })
+        .optional(),
+    })
+    .refine(
+      (payload) => {
+        const phones = payload.nominees.map((nominee) => nominee.phone);
+        return new Set(phones).size === phones.length;
+      },
+      {
+        message: "Nominee phone numbers must be unique",
+        path: ["nominees"],
+      },
+    ),
 });
 
 export const listMisAccountsSchema = z.object({
