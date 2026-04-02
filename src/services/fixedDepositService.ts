@@ -137,7 +137,7 @@ export const softDeleteProjectType = async (
 export const createFdAccount = async (
   actor: Prisma.MembershipModel,
   data: {
-    referrerMembershipId?: string;
+    referrerMembershipId: string;
     customer: {
       fullName: string;
       phone: string;
@@ -227,22 +227,20 @@ export const createFdAccount = async (
     const initialPaymentAmountDecimal = new Prisma.Decimal(initialPaymentAmount);
     const maturityAmount = computeFdMaturityAmount(depositAmount, projectType);
     const maturityDate = calculateMaturityDate(new Date(data.fd.startDate), projectType.duration);
-    const linkedMembershipId = data.referrerMembershipId ?? actor.id;
+    const referrerMembership = await tx.membership.findFirst({
+      where: {
+        id: data.referrerMembershipId,
+        societyId: actor.societyId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
 
-    if (data.referrerMembershipId) {
-      const referrerMembership = await tx.membership.findFirst({
-        where: {
-          id: data.referrerMembershipId,
-          societyId: actor.societyId,
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
-
-      if (!referrerMembership) {
-        throw createHttpError(404, "Selected referrer member not found in this society");
-      }
+    if (!referrerMembership) {
+      throw createHttpError(404, "Selected referrer member not found in this society");
     }
+
+    const linkedMembershipId = data.referrerMembershipId;
 
     const customer = await tx.customer.create({
       data: {

@@ -26,7 +26,7 @@ interface CreateMisProjectTypeInput {
 }
 
 interface CreateMisAccountInput {
-  referrerMembershipId?: string;
+  referrerMembershipId: string;
   customer: {
     fullName: string;
     phone: string;
@@ -232,21 +232,20 @@ export const createMisAccount = async (
       throw createHttpError(404, "MIS project type not found for this society");
     }
 
-    const linkedMembershipId = data.referrerMembershipId ?? actor.id;
-    if (data.referrerMembershipId) {
-      const referrerMembership = await tx.membership.findFirst({
-        where: {
-          id: data.referrerMembershipId,
-          societyId: actor.societyId,
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
+    const referrerMembership = await tx.membership.findFirst({
+      where: {
+        id: data.referrerMembershipId,
+        societyId: actor.societyId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
 
-      if (!referrerMembership) {
-        throw createHttpError(404, "Selected referrer member not found in this society");
-      }
+    if (!referrerMembership) {
+      throw createHttpError(404, "Selected referrer member not found in this society");
     }
+
+    const linkedMembershipId = data.referrerMembershipId;
 
     const customer = await tx.customer.create({
       data: {

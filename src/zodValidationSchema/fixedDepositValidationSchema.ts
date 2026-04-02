@@ -76,7 +76,7 @@ export const listProjectTypesSchema = z.object({
 export const createFdAccountSchema = z.object({
   body: z
     .object({
-      referrerMembershipId: cuidSchema.optional(),
+      referrerMembershipId: cuidSchema,
       customer: z.object({
         fullName: z.string().trim().min(2, "Customer name is required").max(150),
         phone: phoneSchema,
