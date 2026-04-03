@@ -65,7 +65,9 @@ export const createProjectType = async (
         maturityAmountPerHundred: isPerRs100
           ? new Prisma.Decimal(data.maturityValue)
           : new Prisma.Decimal(0),
-        maturityMultiple: isPerRs100 ? new Prisma.Decimal(0) : new Prisma.Decimal(data.maturityValue),
+        maturityMultiple: isPerRs100
+          ? new Prisma.Decimal(0)
+          : new Prisma.Decimal(data.maturityValue),
         societyId: actor.societyId,
         createdBy: actor.userId,
       },
@@ -547,7 +549,7 @@ export const updateFdAccount = async (
       pan?: string;
     }[];
     documents?: {
-      updates?: Array<{ id: string; displayName: string }>;
+      updates?: { id: string; displayName: string }[];
       deleteIds?: string[];
     };
   },

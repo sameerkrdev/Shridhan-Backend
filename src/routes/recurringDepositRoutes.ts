@@ -5,28 +5,38 @@ import { requirePermission } from "@/middlewares/permissionMiddleware.js";
 import zodValidatorMiddleware from "@/middlewares/zodValidationMiddleware.js";
 import {
   createRdAccountSchema,
+  createRdFineWaiveRequestSchema,
   createRdProjectTypeSchema,
   deleteRdAccountSchema,
   deleteRdProjectTypeSchema,
   getRdDetailSchema,
+  listRdFineWaiveRequestsSchema,
+  listPendingRdFineWaiveRequestsSchema,
   listRdAccountsSchema,
   listRdProjectTypesSchema,
   payRdSchema,
   previewRdPaymentSchema,
+  approveRdFineWaiveRequestSchema,
+  rejectRdFineWaiveRequestSchema,
   updateRdAccountSchema,
   withdrawRdSchema,
 } from "@/zodValidationSchema/recurringDepositValidationSchema.js";
 import {
+  approveFineWaiveRequest,
   createAccount,
+  createFineWaiveRequest,
   createProjectType,
   deleteAccount,
   deleteProjectType,
   getAccountDetail,
   getAccounts,
+  getFineWaiveRequests,
+  getPendingFineWaiveRequests,
   getProjectTypes,
   getReferrers,
   pay,
   previewPayment,
+  rejectFineWaiveRequest,
   updateAccount,
   withdraw,
 } from "@/controllers/recurringDepositController.js";
@@ -115,6 +125,51 @@ router.post(
   requirePermission("pay", "recurring_deposit"),
   zodValidatorMiddleware(previewRdPaymentSchema),
   (req, res, next) => previewPayment(req as IAuthorizedRequest, res, next),
+);
+
+router.post(
+  "/:id/fine-waive-requests",
+  auth,
+  billingGate,
+  requirePermission("request_fine_waive", "recurring_deposit"),
+  zodValidatorMiddleware(createRdFineWaiveRequestSchema),
+  (req, res, next) => createFineWaiveRequest(req as IAuthorizedRequest, res, next),
+);
+
+router.get(
+  "/fine-waive-requests/pending",
+  auth,
+  billingGate,
+  requirePermission("approve_fine_waive", "recurring_deposit"),
+  zodValidatorMiddleware(listPendingRdFineWaiveRequestsSchema),
+  (req, res, next) => getPendingFineWaiveRequests(req as IAuthorizedRequest, res, next),
+);
+
+router.get(
+  "/:id/fine-waive-requests",
+  auth,
+  billingGate,
+  requirePermission("read", "recurring_deposit"),
+  zodValidatorMiddleware(listRdFineWaiveRequestsSchema),
+  (req, res, next) => getFineWaiveRequests(req as IAuthorizedRequest, res, next),
+);
+
+router.post(
+  "/fine-waive-requests/:requestId/approve",
+  auth,
+  billingGate,
+  requirePermission("approve_fine_waive", "recurring_deposit"),
+  zodValidatorMiddleware(approveRdFineWaiveRequestSchema),
+  (req, res, next) => approveFineWaiveRequest(req as IAuthorizedRequest, res, next),
+);
+
+router.post(
+  "/fine-waive-requests/:requestId/reject",
+  auth,
+  billingGate,
+  requirePermission("approve_fine_waive", "recurring_deposit"),
+  zodValidatorMiddleware(rejectRdFineWaiveRequestSchema),
+  (req, res, next) => rejectFineWaiveRequest(req as IAuthorizedRequest, res, next),
 );
 
 router.post(

@@ -58,6 +58,7 @@
     "dotenv": "^17.2.3",
     "envalid": "^8.1.1",
     "express": "^5.1.0",
+    "firebase-admin": "^13.7.0",
     "http-errors": "^2.0.1",
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.3",

@@ -114,11 +114,31 @@ export const refreshTokens = async (
     data: { isRevoked: true },
   });
 
-  if (revokeResult.count !== 1) {
+  if (revokeResult.count === 1) {
+    return generateTokenPair(decoded.sub, deviceInfo);
+  }
+
+  const row = await prisma.refreshToken.findUnique({
+    where: { id: decoded.tokenId },
+  });
+
+  if (row?.userId !== decoded.sub) {
     throw createHttpError(401, "Invalid or expired refresh token");
   }
 
-  return generateTokenPair(decoded.sub, deviceInfo);
+  if (row.isRevoked) {
+    const msSinceRevoke = Date.now() - row.updatedAt.getTime();
+    if (msSinceRevoke >= 0 && msSinceRevoke <= constants.REFRESH_TOKEN_CONCURRENT_REPLAY_GRACE_MS) {
+      return generateTokenPair(row.userId, deviceInfo);
+    }
+    throw createHttpError(401, "Invalid or expired refresh token");
+  }
+
+  if (row.expiresAt <= new Date()) {
+    throw createHttpError(401, "Invalid or expired refresh token");
+  }
+
+  throw createHttpError(401, "Invalid or expired refresh token");
 };
 
 export const revokeRefreshToken = async (refreshToken: string): Promise<void> => {

@@ -103,3 +103,78 @@ export const sendBillingEmail = async (payload: BillingEmailPayload) => {
     messageId: info.messageId,
   });
 };
+
+interface RdFineWaiveEmailPayload {
+  to: string[];
+  subject: string;
+  title: string;
+  statusLabel: string;
+  requesterMembershipId: string;
+  rdId: string;
+  rdCustomerName: string;
+  monthEntries: { monthIndex: number; fine: string }[];
+  reduceFromMaturity: boolean;
+  expiresAt: Date;
+  reason?: string;
+  actionUrl?: string;
+  actionText?: string;
+}
+
+export const sendRdFineWaiveEmail = async (payload: RdFineWaiveEmailPayload) => {
+  if (!payload.to.length) return;
+
+  const monthLines = payload.monthEntries
+    .map((m) => `Month ${m.monthIndex}: Rs. ${Number(m.fine).toFixed(2)}`)
+    .join("\n");
+  const reasonLine = payload.reason ? `Reason: ${payload.reason}\n` : "";
+  const actionLine =
+    payload.actionUrl && payload.actionText ? `\n${payload.actionText}: ${payload.actionUrl}\n` : "";
+  const text = `${payload.title}
+
+Status: ${payload.statusLabel}
+Requester membership: ${payload.requesterMembershipId}
+RD account: ${payload.rdId}
+Customer: ${payload.rdCustomerName}
+Reduce from maturity: ${payload.reduceFromMaturity ? "Yes" : "No"}
+Expires at: ${payload.expiresAt.toISOString()}
+${reasonLine}
+Months:
+${monthLines}
+${actionLine}
+`;
+
+  const htmlMonthLines = payload.monthEntries
+    .map((m) => `<li>Month ${m.monthIndex}: Rs. ${Number(m.fine).toFixed(2)}</li>`)
+    .join("");
+  const info = await transporter.sendMail({
+    from: env.EMAIL_FROM,
+    to: payload.to.join(","),
+    subject: payload.subject,
+    text,
+    html: `
+      <div style="font-family:Arial,sans-serif;padding:16px;">
+        <h2>${payload.title}</h2>
+        <p><strong>Status:</strong> ${payload.statusLabel}</p>
+        <p><strong>Requester membership:</strong> ${payload.requesterMembershipId}</p>
+        <p><strong>RD account:</strong> ${payload.rdId}</p>
+        <p><strong>Customer:</strong> ${payload.rdCustomerName}</p>
+        <p><strong>Reduce from maturity:</strong> ${payload.reduceFromMaturity ? "Yes" : "No"}</p>
+        <p><strong>Expires at:</strong> ${payload.expiresAt.toISOString()}</p>
+        ${payload.reason ? `<p><strong>Reason:</strong> ${payload.reason}</p>` : ""}
+        ${
+          payload.actionUrl && payload.actionText
+            ? `<p><a href="${payload.actionUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#ffffff;text-decoration:none;border-radius:6px;">${payload.actionText}</a></p>`
+            : ""
+        }
+        <p><strong>Months</strong></p>
+        <ul>${htmlMonthLines}</ul>
+      </div>
+    `,
+  });
+
+  logger.info("RD fine waive email sent", {
+    to: payload.to,
+    subject: payload.subject,
+    messageId: info.messageId,
+  });
+};
