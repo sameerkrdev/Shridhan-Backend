@@ -13,13 +13,12 @@ interface MembershipSummary {
   permissions: string[];
   status: string;
   societyName: string;
-  subDomainName: string;
   societyStatus: string;
 }
 
 const mapMemberships = (
   memberships: (Prisma.MembershipModel & {
-    society: { id: string; name: string; subDomainName: string; status: string };
+    society: { id: string; name: string; status: string };
     role: { name: string; permissions: string[] };
   })[],
 ): MembershipSummary[] => {
@@ -31,7 +30,6 @@ const mapMemberships = (
     permissions: m.role.permissions,
     status: m.status,
     societyName: m.society.name,
-    subDomainName: m.society.subDomainName,
     societyStatus: m.society.status,
   }));
 };
@@ -58,7 +56,7 @@ export const createFirstUser = async (data: {
     const memberships = await prisma.membership.findMany({
       where: { userId: existingUser.id, deletedAt: null },
       include: {
-        society: { select: { id: true, name: true, subDomainName: true, status: true } },
+        society: { select: { id: true, name: true, status: true } },
         role: { select: { name: true, permissions: true } },
       },
     });
@@ -123,7 +121,7 @@ export const loginUser = async (
   const memberships = await prisma.membership.findMany({
     where: { userId: user.id, deletedAt: null },
     include: {
-      society: { select: { id: true, name: true, subDomainName: true, status: true } },
+      society: { select: { id: true, name: true, status: true } },
       role: { select: { name: true, permissions: true } },
     },
   });
@@ -174,7 +172,7 @@ export const getSessionPayload = async (
   const memberships = await prisma.membership.findMany({
     where: { userId: user.id, deletedAt: null },
     include: {
-      society: { select: { id: true, name: true, subDomainName: true, status: true } },
+      society: { select: { id: true, name: true, status: true } },
       role: { select: { name: true, permissions: true } },
     },
   });
