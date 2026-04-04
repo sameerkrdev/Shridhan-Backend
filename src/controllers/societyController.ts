@@ -23,12 +23,11 @@ export const onboardSociety = async (
   next: NextFunction,
 ) => {
   try {
-    const { name, subDomainName, country, state, city, zipcode, logoUrl } = req.body;
+    const { name, country, state, city, zipcode, logoUrl } = req.body;
 
     const payload = await createSociety(
       {
         name,
-        subDomainName,
         country,
         state,
         city,

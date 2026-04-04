@@ -13,12 +13,15 @@ config({
 const env = cleanEnv(process.env, {
   PORT: port({ default: 3000 }),
   NODE_ENV: str({ choices: ["development", "test", "production"], default: "development" }),
+
   DATABASE_URL: str(),
+
   RAZORPAY_KEY_ID: str(),
   RAZORPAY_KEY_SECRET: str(),
   RAZORPAY_PLAN_ID: str(),
   RAZORPAY_WEBHOOK_SECRET: str(),
   RAZORPAY_WEBHOOK_OLD_SECRETS: str({ default: "" }),
+
   INTERNAL_DEVELOPER_API_KEY: str({ default: "" }),
 
   JWT_PUBLIC_KEY: str(),
@@ -36,6 +39,10 @@ const env = cleanEnv(process.env, {
 
   WHATSAPP_ACCESS_TOKEN: str(),
   WHATSAPP_PHONE_NUMBER_ID: str(),
+
+  FIREBASE_PROJECT_ID: str(),
+  FIREBASE_CLIENT_EMAIL: str(),
+  FIREBASE_PRIVATE_KEY: str(),
 
   R2_ACCOUNT_ID: str(),
   R2_ACCESS_KEY_ID: str(),

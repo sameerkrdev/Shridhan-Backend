@@ -28,7 +28,7 @@ export const getUserMemberships = async (userId: string) => {
   const [societies, roles, ownerMemberships] = await Promise.all([
     prisma.society.findMany({
       where: { id: { in: memberships.map((membership) => membership.societyId) } },
-      select: { id: true, name: true, subDomainName: true },
+      select: { id: true, name: true },
     }),
     prisma.societyRole.findMany({
       where: { id: { in: memberships.map((membership) => membership.roleId) } },
@@ -55,7 +55,6 @@ export const getUserMemberships = async (userId: string) => {
     membershipId: membership.id,
     societyId: membership.societyId,
     societyName: societyMap.get(membership.societyId)?.name ?? "Unknown Society",
-    subDomainName: societyMap.get(membership.societyId)?.subDomainName ?? "",
     roleId: membership.roleId,
     role: roleMap.get(membership.roleId)?.name ?? "Unknown Role",
     status: membership.status,

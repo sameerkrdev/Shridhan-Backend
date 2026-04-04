@@ -299,6 +299,20 @@ export const PERMISSION_DEFINITIONS: PermissionMeta[] = [
     description: "Allow deferring installment penalties for maturity-time deduction.",
   },
   {
+    key: "recurring_deposit.request_fine_waive",
+    resource: "recurring_deposit",
+    action: "request_fine_waive",
+    label: "Request RD Fine Waive-Off",
+    description: "Create fine waive-off requests for RD payments.",
+  },
+  {
+    key: "recurring_deposit.approve_fine_waive",
+    resource: "recurring_deposit",
+    action: "approve_fine_waive",
+    label: "Approve RD Fine Waive-Off",
+    description: "Approve or reject RD fine waive-off requests.",
+  },
+  {
     key: "recurring_deposit.withdraw",
     resource: "recurring_deposit",
     action: "withdraw",

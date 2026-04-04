@@ -3,6 +3,7 @@ import {
   CustomerAccountType,
   Prisma,
   RdFineCalculationMethod,
+  RdFineWaiveRequestStatus,
   RecurringDepositInstallmentStatus,
   RecurringDepositTransactionType,
   ActivityActionType,
@@ -23,6 +24,13 @@ import {
   type InstallmentInput,
   type RdDueParams,
 } from "@/services/rdDueCalculator.js";
+import {
+  approveRdFineWaiveRequest,
+  createRdFineWaiveRequest,
+  listPendingRdFineWaiveRequests,
+  listRdFineWaiveRequests,
+  rejectRdFineWaiveRequest,
+} from "@/services/rdFineWaiveService.js";
 
 interface CreateRdProjectTypeInput {
   name: string;
@@ -83,6 +91,7 @@ type SkipFinePolicy = "none" | "all" | "selected";
 interface SkipFineInput {
   skipFinePolicy?: SkipFinePolicy;
   skipFineMonths?: number[];
+  waiveRequestId?: string;
 }
 
 const assertMembership = (req: { membership?: Prisma.MembershipModel }) => {
@@ -214,6 +223,62 @@ function resolveSkipFineMonthIndices(
     result.add(m);
   }
   return result;
+}
+
+/** Matches root Prisma + interactive tx clients (incl. Accelerate `$extends`). */
+type RdWaiveDbClient = Pick<typeof prisma, "rdFineWaiveRequest">;
+
+async function resolveSkipFineFromWaiveRequest(
+  tx: RdWaiveDbClient,
+  societyId: string,
+  rdId: string,
+  waiveRequestId: string | undefined,
+): Promise<{
+  skipFineMonthIndices: Set<number>;
+  requestId: string | null;
+  reduceFromMaturity: boolean;
+  approvedByMembershipId: string | null;
+}> {
+  if (!waiveRequestId) {
+    return {
+      skipFineMonthIndices: new Set<number>(),
+      requestId: null,
+      reduceFromMaturity: false,
+      approvedByMembershipId: null,
+    };
+  }
+
+  const request = await tx.rdFineWaiveRequest.findFirst({
+    where: {
+      id: waiveRequestId,
+      recurringDepositId: rdId,
+      recurringDeposit: { customer: { societyId, isDeleted: false } },
+    },
+    include: { months: true },
+  });
+  if (!request) {
+    throw createHttpError(404, "Fine waive request not found");
+  }
+  if (request.status !== RdFineWaiveRequestStatus.APPROVED) {
+    throw createHttpError(400, "Fine waive request is not approved");
+  }
+  if (request.expiresAt.getTime() <= Date.now()) {
+    await tx.rdFineWaiveRequest.update({
+      where: { id: request.id },
+      data: {
+        status: RdFineWaiveRequestStatus.EXPIRED,
+        invalidationReason: "EXPIRED",
+      },
+    });
+    throw createHttpError(400, "Fine waive request is expired");
+  }
+
+  return {
+    skipFineMonthIndices: new Set(request.months.map((m: { monthIndex: number }) => m.monthIndex)),
+    requestId: request.id,
+    reduceFromMaturity: request.reduceFromMaturity,
+    approvedByMembershipId: request.approvedByMembershipId ?? null,
+  };
 }
 
 export const createRdProjectType = async (
@@ -696,7 +761,7 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
       transactions: {
         where: { isDeleted: false },
         orderBy: { createdAt: "desc" },
-        include: { allocations: true },
+        include: { allocations: { include: { waiveRequest: true } } },
       },
     },
   }) as Prisma.RecurringDepositGetPayload<{
@@ -704,7 +769,7 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
       customer: { include: { nominees: true } };
       projectType: true;
       installments: true;
-      transactions: { include: { allocations: true } };
+      transactions: { include: { allocations: { include: { waiveRequest: true } } } };
     };
   }> | null;
 
@@ -724,6 +789,20 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
   );
   const netMaturityPayoutAfterDeferredFines = Prisma.Decimal.max(
     rd.expectedMaturityPayout.sub(totalDeferredFines),
+    new Prisma.Decimal(0),
+  );
+  const totalMarkedWaiveFromMaturity = rd.transactions.reduce(
+    (txSum, txRow) =>
+      txSum.add(
+        txRow.allocations.reduce((allocSum, alloc) => {
+          if (alloc.waiveRequest?.reduceFromMaturity !== true) return allocSum;
+          return allocSum.add(alloc.waivedFineAmount);
+        }, new Prisma.Decimal(0)),
+      ),
+    new Prisma.Decimal(0),
+  );
+  const netMaturityPayoutAfterMarkedWaives = Prisma.Decimal.max(
+    rd.expectedMaturityPayout.sub(totalMarkedWaiveFromMaturity),
     new Prisma.Decimal(0),
   );
   const installmentsWithDue = rd.installments.map((inst: RecurringDepositInstallment) => {
@@ -746,7 +825,9 @@ export const getRdDetail = async (rdId: string, societyId: string) => {
       expectedMaturityPayout: rd.expectedMaturityPayout.toString(),
       grossMaturityPayout: rd.expectedMaturityPayout.toString(),
       totalDeferredFines: totalDeferredFines.toString(),
+      totalMarkedWaiveFromMaturity: totalMarkedWaiveFromMaturity.toString(),
       netMaturityPayoutAfterDeferredFines: netMaturityPayoutAfterDeferredFines.toString(),
+      netMaturityPayoutAfterMarkedWaives: netMaturityPayoutAfterMarkedWaives.toString(),
       totalPrincipalExpected: rd.totalPrincipalExpected.toString(),
     },
   };
@@ -864,15 +945,19 @@ export const previewRdPayment = async (
   const lines = computeDueLines(toInstallmentInputs(rd.installments), params, now);
 
   const monthFilter = validateMonthFilter(input.months, rd.installments);
+  const waiveContext = await resolveSkipFineFromWaiveRequest(prisma, societyId, rdId, input.waiveRequestId);
   const skipFinePolicy = input.skipFinePolicy ?? "none";
-  const skipFineMonthIndices = resolveSkipFineMonthIndices(
-    skipFinePolicy,
-    monthFilter,
-    input.skipFineMonths,
-    lines,
-    rd.installments,
-  );
-  const maxDue = skipFinePolicy === "none"
+  const skipFineMonthIndices = waiveContext.requestId
+    ? waiveContext.skipFineMonthIndices
+    : resolveSkipFineMonthIndices(
+      skipFinePolicy,
+      monthFilter,
+      input.skipFineMonths,
+      lines,
+      rd.installments,
+    );
+  const effectiveSkipPolicy = waiveContext.requestId ? "selected" : skipFinePolicy;
+  const maxDue = effectiveSkipPolicy === "none"
     ? sumTotalDue(lines, monthFilter)
     : sumMaxAllocatable(lines, monthFilter, skipFineMonthIndices);
   let amountDecimal: Prisma.Decimal;
@@ -888,7 +973,7 @@ export const previewRdPayment = async (
     amountDecimal = new Prisma.Decimal(0);
   }
 
-  const allocationResult = skipFinePolicy === "none"
+  const allocationResult = effectiveSkipPolicy === "none"
     ? (() => {
       const standard = fifoAllocatePayment(lines, amountDecimal, monthFilter);
       return {
@@ -902,7 +987,10 @@ export const previewRdPayment = async (
       };
     })()
     : fifoAllocatePaymentWithFineSkip(lines, amountDecimal, monthFilter, skipFineMonthIndices);
-  const { allocations, unallocated, deferredFineDeltas } = allocationResult;
+  const { allocations, unallocated } = allocationResult;
+  const deferredFineDeltas = waiveContext.requestId && !waiveContext.reduceFromMaturity
+    ? []
+    : allocationResult.deferredFineDeltas;
 
   return {
     maxDue: maxDue.toString(),
@@ -919,8 +1007,10 @@ export const previewRdPayment = async (
       deferredFineDelta: d.deferredFineDelta.toString(),
     })),
     unallocated: unallocated.toString(),
-    skipFinePolicy,
+    skipFinePolicy: effectiveSkipPolicy,
     skipFineMonths: Array.from(skipFineMonthIndices),
+    waiveRequestId: waiveContext.requestId,
+    reduceFromMaturity: waiveContext.reduceFromMaturity,
     lines: lines.map((l) => ({
       installmentId: l.installmentId,
       monthIndex: l.monthIndex,
@@ -956,7 +1046,10 @@ export const payRd = async (
         },
       },
     }) as Prisma.RecurringDepositGetPayload<{
-      include: { installments: true };
+      include: {
+        installments: true;
+        transactions: { include: { allocations: { include: { waiveRequest: true } } } };
+      };
     }> | null;
 
     if (!rd) {
@@ -970,17 +1063,22 @@ export const payRd = async (
     const now = new Date();
     const params = rdDueParamsFromAccount(rd);
     const lines = computeDueLines(toInstallmentInputs(rd.installments), params, now);
+    const lineByInstallmentId = new Map(lines.map((l) => [l.installmentId, l] as const));
 
     const monthFilter = validateMonthFilter(data.months, rd.installments);
+    const waiveContext = await resolveSkipFineFromWaiveRequest(tx, actor.societyId, rdId, data.waiveRequestId);
     const skipFinePolicy = data.skipFinePolicy ?? "none";
-    const skipFineMonthIndices = resolveSkipFineMonthIndices(
-      skipFinePolicy,
-      monthFilter,
-      data.skipFineMonths,
-      lines,
-      rd.installments,
-    );
-    const maxDue = skipFinePolicy === "none"
+    const skipFineMonthIndices = waiveContext.requestId
+      ? waiveContext.skipFineMonthIndices
+      : resolveSkipFineMonthIndices(
+        skipFinePolicy,
+        monthFilter,
+        data.skipFineMonths,
+        lines,
+        rd.installments,
+      );
+    const effectiveSkipPolicy = waiveContext.requestId ? "selected" : skipFinePolicy;
+    const maxDue = effectiveSkipPolicy === "none"
       ? sumTotalDue(lines, monthFilter)
       : sumMaxAllocatable(lines, monthFilter, skipFineMonthIndices);
     const payAmount = new Prisma.Decimal(data.amount);
@@ -988,7 +1086,7 @@ export const payRd = async (
       throw createHttpError(400, "Payment exceeds total due");
     }
 
-    const allocationResult = skipFinePolicy === "none"
+    const allocationResult = effectiveSkipPolicy === "none"
       ? (() => {
         const standard = fifoAllocatePayment(lines, payAmount, monthFilter);
         return {
@@ -1002,7 +1100,10 @@ export const payRd = async (
         };
       })()
       : fifoAllocatePaymentWithFineSkip(lines, payAmount, monthFilter, skipFineMonthIndices);
-    const { allocations, unallocated, deferredFineDeltas } = allocationResult;
+    const { allocations, unallocated } = allocationResult;
+    const deferredFineDeltas = waiveContext.requestId && !waiveContext.reduceFromMaturity
+      ? []
+      : allocationResult.deferredFineDeltas;
     if (unallocated.gt(0)) {
       throw createHttpError(400, "Could not allocate payment");
     }
@@ -1037,12 +1138,21 @@ export const payRd = async (
     );
 
     for (const alloc of allocations) {
+      const dueLine = lineByInstallmentId.get(alloc.installmentId);
+      const waiveFineForLine = dueLine && waiveContext.requestId
+        && skipFineMonthIndices.has(alloc.monthIndex)
+        && alloc.principalApplied.gte(dueLine.remainingPrincipal)
+        ? dueLine.fine
+        : new Prisma.Decimal(0);
       await tx.recurringDepositPaymentAllocation.create({
         data: {
           transactionId: transactionRow.id,
           installmentId: alloc.installmentId,
           principalApplied: alloc.principalApplied,
           fineApplied: alloc.fineApplied,
+          waivedFineAmount: waiveFineForLine,
+          waivedByRequestId: waiveContext.requestId,
+          waivedApprovedByMembershipId: waiveContext.approvedByMembershipId,
         },
       });
 
@@ -1064,6 +1174,32 @@ export const payRd = async (
           ),
           updatedBy: actor.userId,
         },
+      });
+    }
+
+    if (waiveContext.requestId) {
+      await tx.rdFineWaiveRequest.update({
+        where: { id: waiveContext.requestId },
+        data: {
+          status: RdFineWaiveRequestStatus.INVALIDATED,
+          invalidationReason: "PAID_ALREADY",
+        },
+      });
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.RD_ACCOUNT,
+        entityId: rdId,
+        actionType: ActivityActionType.WAIVED_FINE_APPLIED_IN_PAYMENT,
+        metadata: {
+          waiveRequestId: waiveContext.requestId,
+          skipFineMonths: Array.from(skipFineMonthIndices),
+          reduceFromMaturity: waiveContext.reduceFromMaturity,
+        },
+      });
+      await logActivity(tx, actor, {
+        entityType: ActivityEntityType.RD_ACCOUNT,
+        entityId: rdId,
+        actionType: ActivityActionType.WAIVE_REQUEST_INVALIDATED,
+        metadata: { waiveRequestId: waiveContext.requestId, reason: "PAID_ALREADY" },
       });
     }
 
@@ -1089,7 +1225,7 @@ export const payRd = async (
 export const withdrawRd = async (
   actor: Prisma.MembershipModel,
   rdId: string,
-  data: PaymentMetaInput & { deductDeferredFinesFromMaturity?: boolean },
+  data: PaymentMetaInput & { deductDeferredFinesFromMaturity?: boolean; fineDeductionMode?: "all" | "marked_only" },
 ) => {
   return prisma.$transaction(async (tx) => {
     const rd = await tx.recurringDeposit.findFirst({
@@ -1103,9 +1239,16 @@ export const withdrawRd = async (
           where: { isDeleted: false },
           orderBy: { monthIndex: "asc" },
         },
+        transactions: {
+          where: { isDeleted: false },
+          include: { allocations: { include: { waiveRequest: true } } },
+        },
       },
     }) as Prisma.RecurringDepositGetPayload<{
-      include: { installments: true };
+      include: {
+        installments: true;
+        transactions: { include: { allocations: { include: { waiveRequest: true } } } };
+      };
     }> | null;
 
     if (!rd) {
@@ -1132,18 +1275,33 @@ export const withdrawRd = async (
       (sum, inst) => sum.add(inst.deferredFineAccrued),
       new Prisma.Decimal(0),
     );
-    const shouldDeductDeferredFines =
-      totalDeferredFines.gt(0) && data.deductDeferredFinesFromMaturity === true;
-    if (totalDeferredFines.gt(0) && !shouldDeductDeferredFines) {
+    const totalMarkedWaiveFromMaturity = rd.transactions.reduce(
+      (txSum: Prisma.Decimal, txRow: (typeof rd.transactions)[number]) =>
+        txSum.add(
+          txRow.allocations.reduce((allocSum: Prisma.Decimal, alloc: (typeof txRow.allocations)[number]) => {
+            if (alloc.waiveRequest?.reduceFromMaturity !== true) return allocSum;
+            return allocSum.add(alloc.waivedFineAmount);
+          }, new Prisma.Decimal(0)),
+        ),
+      new Prisma.Decimal(0),
+    );
+
+    const deductionMode = data.fineDeductionMode
+      ?? (data.deductDeferredFinesFromMaturity ? "all" : undefined);
+    const deductionAmount = deductionMode === "marked_only"
+      ? totalMarkedWaiveFromMaturity
+      : deductionMode === "all"
+        ? totalDeferredFines
+        : new Prisma.Decimal(0);
+
+    if (totalDeferredFines.gt(0) && deductionAmount.lte(0)) {
       throw createHttpError(
         400,
         "Deferred fines are pending. Enable maturity deduction to settle and withdraw.",
       );
     }
 
-    const payout = shouldDeductDeferredFines
-      ? rd.expectedMaturityPayout.sub(totalDeferredFines)
-      : rd.expectedMaturityPayout;
+    const payout = rd.expectedMaturityPayout.sub(deductionAmount);
     if (payout.lt(0)) {
       throw createHttpError(400, "Deferred fines exceed maturity payout");
     }
@@ -1154,7 +1312,7 @@ export const withdrawRd = async (
         amount: payout,
         principalAmount: rd.totalPrincipalExpected,
         // Fine amount on PAYOUT stores deferred fine settlement done at maturity.
-        fineAmount: shouldDeductDeferredFines ? totalDeferredFines : new Prisma.Decimal(0),
+        fineAmount: deductionAmount,
         type: RecurringDepositTransactionType.PAYOUT,
         paymentMethod: data.paymentMethod ?? null,
         transactionId: data.transactionId ?? null,
@@ -1185,7 +1343,10 @@ export const withdrawRd = async (
       entityType: ActivityEntityType.RD_ACCOUNT,
       entityId: rd.id,
       actionType: ActivityActionType.WITHDRAWN,
-      metadata: { deductDeferredFinesFromMaturity: data.deductDeferredFinesFromMaturity === true },
+      metadata: {
+        fineDeductionMode: deductionMode ?? "none",
+        deductionAmount: deductionAmount.toString(),
+      },
     });
     return updated;
   });
@@ -1229,4 +1390,12 @@ export const softDeleteRdAccount = async (actor: Prisma.MembershipModel, rdId: s
     });
     return deleted;
   });
+};
+
+export {
+  createRdFineWaiveRequest,
+  listRdFineWaiveRequests,
+  listPendingRdFineWaiveRequests,
+  approveRdFineWaiveRequest,
+  rejectRdFineWaiveRequest,
 };

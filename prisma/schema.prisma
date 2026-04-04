@@ -10,7 +10,6 @@ datasource db {
 model Society {
   id                                String                             @id @default(uuid())
   name                              String                             @unique
-  subDomainName                     String                             @unique
   country                           String
   state                             String
   city                              String
@@ -32,7 +31,6 @@ model Society {
   roles                             SocietyRole[]
   subscriptions                     Subscription[]
 
-  @@index([subDomainName])
   @@index([status])
 }
 
@@ -501,6 +499,7 @@ model RecurringDeposit {
   projectType                RecurringDepositProjectType   @relation(fields: [projectTypeId], references: [id])
   installments               RecurringDepositInstallment[]
   transactions               RecurringDepositTransaction[]
+  fineWaiveRequests          RdFineWaiveRequest[]
   documents                  ServiceDocument[]
 
   @@index([projectTypeId])
@@ -561,12 +560,54 @@ model RecurringDepositPaymentAllocation {
   installmentId    String
   principalApplied Decimal                     @db.Decimal(14, 2)
   fineApplied      Decimal                     @default(0) @db.Decimal(14, 2)
+  waivedFineAmount Decimal                     @default(0) @db.Decimal(14, 2)
+  waivedByRequestId String?
+  waivedApprovedByMembershipId String?
   createdAt        DateTime                    @default(now())
   installment      RecurringDepositInstallment @relation(fields: [installmentId], references: [id])
   transaction      RecurringDepositTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  waiveRequest     RdFineWaiveRequest?         @relation(fields: [waivedByRequestId], references: [id])
 
   @@index([transactionId])
   @@index([installmentId])
+  @@index([waivedByRequestId])
+}
+
+model RdFineWaiveRequest {
+  id                        String                         @id @default(uuid())
+  recurringDepositId        String
+  requestedByMembershipId   String
+  scopeType                 RdFineWaiveScopeType
+  reason                    String?
+  expiresAt                 DateTime
+  status                    RdFineWaiveRequestStatus      @default(PENDING)
+  reduceFromMaturity        Boolean                        @default(false)
+  approvedByMembershipId    String?
+  approvedAt                DateTime?
+  rejectedByMembershipId    String?
+  rejectedAt                DateTime?
+  rejectionReason           String?
+  invalidationReason        RdFineWaiveInvalidationReason?
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+  recurringDeposit          RecurringDeposit               @relation(fields: [recurringDepositId], references: [id], onDelete: Cascade)
+  months                    RdFineWaiveRequestMonth[]
+  paymentAllocations        RecurringDepositPaymentAllocation[]
+
+  @@index([recurringDepositId, status, expiresAt])
+  @@index([requestedByMembershipId])
+}
+
+model RdFineWaiveRequestMonth {
+  id                 String             @id @default(uuid())
+  requestId          String
+  monthIndex         Int
+  waivedFineAmount   Decimal            @default(0) @db.Decimal(14, 2)
+  createdAt          DateTime           @default(now())
+  request            RdFineWaiveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, monthIndex])
+  @@index([requestId])
 }
 
 model Loan {
@@ -711,6 +752,25 @@ enum RdFineCalculationMethod {
   PROPORTIONAL_PER_HUNDRED
 }
 
+enum RdFineWaiveScopeType {
+  ALL
+  SELECTED
+}
+
+enum RdFineWaiveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  INVALIDATED
+}
+
+enum RdFineWaiveInvalidationReason {
+  PAID_ALREADY
+  MANUAL_REJECT
+  EXPIRED
+}
+
 enum ActivityEntityType {
   FD_PROJECT_TYPE
   MIS_PROJECT_TYPE
@@ -730,6 +790,11 @@ enum ActivityActionType {
   INTEREST_PAID
   PRINCIPAL_RETURNED
   PAYMENT_ADDED
+  WAIVE_REQUEST_CREATED
+  WAIVE_REQUEST_APPROVED
+  WAIVE_REQUEST_REJECTED
+  WAIVE_REQUEST_INVALIDATED
+  WAIVED_FINE_APPLIED_IN_PAYMENT
   WITHDRAWN
   DOCUMENT_UPLOAD_COMPLETED
   DOCUMENT_UPDATED

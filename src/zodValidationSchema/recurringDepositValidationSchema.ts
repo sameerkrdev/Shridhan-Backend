@@ -4,6 +4,7 @@ const uuidSchema = z.uuid();
 const cuidSchema = z.string().cuid("Invalid member id");
 const paymentMethodSchema = z.enum(["UPI", "CASH", "CHEQUE"]);
 const skipFinePolicySchema = z.enum(["none", "all", "selected"]);
+const waiveScopeTypeSchema = z.enum(["all", "selected"]);
 const emptyStringToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((value) => {
     if (typeof value !== "string") return value;
@@ -249,6 +250,7 @@ export const previewRdPaymentSchema = z.object({
       months: z.array(z.number().int().min(1)).optional(),
       skipFinePolicy: skipFinePolicySchema.optional(),
       skipFineMonths: z.array(z.number().int().min(1)).optional(),
+      waiveRequestId: uuidSchema.optional(),
     })
     .superRefine((payload, ctx) => {
       if (payload.amount !== undefined && payload.amount <= 0) {
@@ -278,6 +280,7 @@ export const payRdSchema = z.object({
       months: z.array(z.number().int().min(1)).optional(),
       skipFinePolicy: skipFinePolicySchema.optional(),
       skipFineMonths: z.array(z.number().int().min(1)).optional(),
+      waiveRequestId: uuidSchema.optional(),
       paymentMethod: paymentMethodSchema.optional(),
       transactionId: emptyStringToUndefined(z.string().max(120)),
       upiId: emptyStringToUndefined(upiIdSchema),
@@ -334,6 +337,7 @@ export const withdrawRdSchema = z.object({
   body: z
     .object({
       deductDeferredFinesFromMaturity: z.boolean().optional(),
+      fineDeductionMode: z.enum(["all", "marked_only"]).optional(),
       paymentMethod: paymentMethodSchema.optional(),
       transactionId: emptyStringToUndefined(z.string().max(120)),
       upiId: emptyStringToUndefined(upiIdSchema),
@@ -380,4 +384,61 @@ export const deleteRdAccountSchema = z.object({
   params: z.object({
     id: uuidSchema,
   }),
+});
+
+export const createRdFineWaiveRequestSchema = z.object({
+  params: z.object({
+    id: uuidSchema,
+  }),
+  body: z
+    .object({
+      scopeType: waiveScopeTypeSchema,
+      months: z.array(z.number().int().min(1)).optional(),
+      ttlDays: z.number().int().min(1).max(30).optional(),
+      expiresAt: z.coerce.date().optional(),
+      reduceFromMaturity: z.boolean().optional(),
+      reason: z.string().trim().max(1000).optional(),
+      autoApprove: z.boolean().optional(),
+    })
+    .superRefine((payload, ctx) => {
+      if (payload.scopeType === "selected" && (!payload.months || payload.months.length === 0)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["months"],
+          message: "Select at least one month for selected scope",
+        });
+      }
+      if (payload.ttlDays !== undefined && payload.expiresAt !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["ttlDays"],
+          message: "Provide either ttlDays or expiresAt, not both",
+        });
+      }
+    }),
+});
+
+export const listRdFineWaiveRequestsSchema = z.object({
+  params: z.object({
+    id: uuidSchema,
+  }),
+});
+
+export const approveRdFineWaiveRequestSchema = z.object({
+  params: z.object({
+    requestId: uuidSchema,
+  }),
+});
+
+export const rejectRdFineWaiveRequestSchema = z.object({
+  params: z.object({
+    requestId: uuidSchema,
+  }),
+  body: z.object({
+    rejectionReason: z.string().trim().max(1000).optional(),
+  }),
+});
+
+export const listPendingRdFineWaiveRequestsSchema = z.object({
+  query: z.object({}),
 });

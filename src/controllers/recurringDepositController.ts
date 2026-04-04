@@ -1,14 +1,19 @@
 import prisma from "@/config/prisma.js";
 import {
+  approveRdFineWaiveRequest,
   assertMembership,
+  createRdFineWaiveRequest,
   createRdAccount,
   createRdProjectType,
   getRdDetail,
+  listRdFineWaiveRequests,
+  listPendingRdFineWaiveRequests,
   listRdAccounts,
   listRdProjectTypes,
   listRdReferrerMembers,
   payRd,
   previewRdPayment,
+  rejectRdFineWaiveRequest,
   softDeleteRdAccount,
   softDeleteRdProjectType,
   updateRdAccount,
@@ -25,12 +30,20 @@ const requiresSkipFinePermission = (policy?: SkipFinePolicy): boolean => {
 };
 
 const ensureCanSkipFine = async (actor: { roleId: string; societyId: string }) => {
+  return ensureHasPermission(actor, "recurring_deposit.pay_skip_fine", "You do not have permission to skip RD fines");
+};
+
+const ensureHasPermission = async (
+  actor: { roleId: string; societyId: string },
+  permission: string,
+  message = "Permission denied",
+) => {
   const role = await prisma.societyRole.findFirst({
     where: { id: actor.roleId, societyId: actor.societyId },
     select: { permissions: true },
   });
-  if (!role?.permissions.includes("recurring_deposit.pay_skip_fine")) {
-    throw createHttpError(403, "You do not have permission to skip RD fines");
+  if (!role?.permissions.includes(permission)) {
+    throw createHttpError(403, message);
   }
 };
 
@@ -194,6 +207,100 @@ export const previewPayment = async (
     }
     const preview = await previewRdPayment(actor.societyId, id, body);
     res.json(preview);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createFineWaiveRequest = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+
+    let autoApprove = false;
+    try {
+      await ensureHasPermission(
+        actor,
+        "recurring_deposit.approve_fine_waive",
+        "You do not have permission to approve RD waive requests",
+      );
+      autoApprove = true;
+    } catch {
+      autoApprove = false;
+    }
+
+    const request = await createRdFineWaiveRequest(actor, id, {
+      ...(req.body as object),
+      autoApprove,
+    } as never);
+    res.status(201).json(request);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getFineWaiveRequests = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const id = getRequiredParam(req.params.id, "id");
+    const requests = await listRdFineWaiveRequests(actor, id);
+    res.json({ requests });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const approveFineWaiveRequest = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const requestId = getRequiredParam(req.params.requestId, "requestId");
+    const request = await approveRdFineWaiveRequest(actor, requestId);
+    res.json(request);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rejectFineWaiveRequest = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const requestId = getRequiredParam(req.params.requestId, "requestId");
+    const request = await rejectRdFineWaiveRequest(
+      actor,
+      requestId,
+      (req.body as { rejectionReason?: string }).rejectionReason,
+    );
+    res.json(request);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPendingFineWaiveRequests = async (
+  req: IAuthorizedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const actor = assertMembership(req);
+    const requests = await listPendingRdFineWaiveRequests(actor);
+    res.json({ requests });
   } catch (error) {
     next(error);
   }

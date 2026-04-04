@@ -135,7 +135,7 @@ const statusRouteMap: Record<SocietyStatusKey, string> = {
 
 export const createSociety = async (data: Prisma.SocietyCreateInput, creator: Prisma.UserModel) => {
   const existingSociety = await prisma.society.findFirst({
-    where: { OR: [{ name: data.name }, { subDomainName: data.subDomainName }] },
+    where: { name: data.name },
   });
 
   if (existingSociety) {
@@ -208,7 +208,7 @@ export const getMemberSocieties = async (userId: string) => {
     where: { userId, deletedAt: null },
     include: {
       society: {
-        select: { id: true, name: true, subDomainName: true, status: true },
+        select: { id: true, name: true, status: true },
       },
       role: {
         select: { id: true, name: true, permissions: true },
@@ -224,7 +224,6 @@ export const getMemberSocieties = async (userId: string) => {
     status: m.status,
     societyId: m.societyId,
     societyName: m.society.name,
-    subDomainName: m.society.subDomainName,
     societyStatus: m.society.status as SocietyStatusKey,
   }));
 };
@@ -234,7 +233,7 @@ export const resolveMemberSociety = async (userId: string, societyId: string) =>
     where: { userId, societyId, deletedAt: null },
     include: {
       society: {
-        select: { id: true, name: true, subDomainName: true, status: true },
+        select: { id: true, name: true, status: true },
       },
       role: {
         select: { id: true, name: true, permissions: true },
@@ -250,7 +249,6 @@ export const resolveMemberSociety = async (userId: string, societyId: string) =>
     membershipId: membership.id,
     societyId: membership.society.id,
     societyName: membership.society.name,
-    subDomainName: membership.society.subDomainName,
     societyStatus: membership.society.status,
     role: membership.role.name,
     roleId: membership.role.id,
