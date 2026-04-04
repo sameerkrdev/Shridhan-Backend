@@ -92,7 +92,7 @@ interface UpdateMisAccountInput {
     pan?: string;
   }[];
   documents?: {
-    updates?: Array<{ id: string; displayName: string }>;
+    updates?: { id: string; displayName: string }[];
     deleteIds?: string[];
   };
 }
@@ -120,7 +120,10 @@ const calculateMonthlyInterest = (
 ) => {
   if (projectType.calculationMethod === MisCalculationMethod.ANNUAL_INTEREST_RATE) {
     if (projectType.annualInterestRate === null) {
-      throw createHttpError(500, "MIS project type configuration is invalid: annualInterestRate is missing");
+      throw createHttpError(
+        500,
+        "MIS project type configuration is invalid: annualInterestRate is missing",
+      );
     }
     return depositAmount.mul(projectType.annualInterestRate).div(100).div(12);
   }
@@ -148,7 +151,10 @@ export const createMisProjectType = async (
     data.calculationMethod === MisCalculationMethod.MONTHLY_PAYOUT_PER_HUNDRED &&
     data.monthlyPayoutAmountPerHundred === undefined
   ) {
-    throw createHttpError(400, "monthlyPayoutAmountPerHundred is required for selected calculation method");
+    throw createHttpError(
+      400,
+      "monthlyPayoutAmountPerHundred is required for selected calculation method",
+    );
   }
   if (
     data.calculationMethod === MisCalculationMethod.ANNUAL_INTEREST_RATE &&
@@ -617,7 +623,10 @@ export const payMisInterest = async (
       }
     }
 
-    const expectedRowsByMonth = new Map<number, { id: string; isExpected: boolean; amount: Prisma.Decimal }>();
+    const expectedRowsByMonth = new Map<
+      number,
+      { id: string; isExpected: boolean; amount: Prisma.Decimal }
+    >();
     for (const transaction of mis.transactions) {
       if (transaction.month === null) continue;
       if (transaction.isExpected) {

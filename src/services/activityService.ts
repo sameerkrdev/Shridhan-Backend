@@ -1,13 +1,15 @@
-import type { Prisma } from "@/generated/prisma/client.js";
+import type { ActivityActionType, ActivityEntityType, Prisma } from "@/generated/prisma/client.js";
 import prisma from "@/config/prisma.js";
 
+type ActivityPersistenceClient = Pick<typeof prisma, "membership" | "activityLog">;
+
 export const logActivity = async (
-  tx: any,
+  tx: ActivityPersistenceClient,
   actor: Prisma.MembershipModel,
   input: {
-    entityType: string;
+    entityType: ActivityEntityType;
     entityId: string;
-    actionType: string;
+    actionType: ActivityActionType;
     metadata?: Prisma.InputJsonValue;
   },
 ) => {
@@ -29,7 +31,7 @@ export const logActivity = async (
       actorName: actorMembership?.user.name ?? "Unknown",
       actorPhone: actorMembership?.user.phone ?? "N/A",
       actorRoleName: actorMembership?.role.name ?? "N/A",
-      metadata: input.metadata,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     },
   });
 };

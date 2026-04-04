@@ -11,7 +11,15 @@ export default [
   eslintConfigPrettier,
 
   {
-    ignores: ["dist/**", "build/**", "node_modules/**", "eslint.config.mjs"],
+    ignores: [
+      "dist/**",
+      "build/**",
+      "node_modules/**",
+      "eslint.config.mjs",
+      "prisma.config.mts",
+      "vitest.config.ts",
+      // "tests/**",
+    ],
   },
 
   {
