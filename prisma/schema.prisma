@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["typedSql"]
 }
 
 datasource db {
@@ -35,18 +36,18 @@ model Society {
 }
 
 model ActivityLog {
-  id                 String             @id @default(uuid())
-  societyId          String
-  entityType         ActivityEntityType
-  entityId           String
-  actionType         ActivityActionType
-  actorMembershipId  String?
-  actorName          String
-  actorPhone         String
-  actorRoleName      String
-  metadata           Json?
-  createdAt          DateTime           @default(now())
-  society            Society            @relation(fields: [societyId], references: [id])
+  id                String             @id @default(uuid())
+  societyId         String
+  entityType        ActivityEntityType
+  entityId          String
+  actionType        ActivityActionType
+  actorMembershipId String?
+  actorName         String
+  actorPhone        String
+  actorRoleName     String
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  society           Society            @relation(fields: [societyId], references: [id])
 
   @@index([societyId, entityType, entityId, createdAt])
   @@index([societyId, createdAt])
@@ -264,24 +265,24 @@ model Nominee {
 }
 
 model FixedDepositProjectType {
-  id                          String                     @id @default(uuid())
-  name                        String
-  minimumAmount               Decimal                    @default(0) @db.Decimal(14, 2)
-  maturityMultiple            Decimal                    @db.Decimal(14, 2)
-  maturityAmountPerHundred    Decimal                    @db.Decimal(14, 2)
-  maturityCalculationMethod   MaturityCalculationMethod  @default(PER_RS_100)
-  duration                    Int
-  version                  Int          @default(1)
-  isArchived               Boolean      @default(false)
-  societyId                String
-  isDeleted                Boolean      @default(false)
-  deletedAt                DateTime?
-  createdBy                String
-  updatedBy                String?
-  createdAt                DateTime     @default(now())
-  updatedAt                DateTime     @updatedAt
-  fixDeposits              FixDeposit[]
-  society                  Society      @relation(fields: [societyId], references: [id])
+  id                        String                    @id @default(uuid())
+  name                      String
+  minimumAmount             Decimal                   @default(0) @db.Decimal(14, 2)
+  maturityMultiple          Decimal                   @db.Decimal(14, 2)
+  maturityAmountPerHundred  Decimal                   @db.Decimal(14, 2)
+  maturityCalculationMethod MaturityCalculationMethod @default(PER_RS_100)
+  duration                  Int
+  version                   Int                       @default(1)
+  isArchived                Boolean                   @default(false)
+  societyId                 String
+  isDeleted                 Boolean                   @default(false)
+  deletedAt                 DateTime?
+  createdBy                 String
+  updatedBy                 String?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  fixDeposits               FixDeposit[]
+  society                   Society                   @relation(fields: [societyId], references: [id])
 
   @@index([societyId])
   @@index([name])
@@ -371,24 +372,24 @@ model ServiceDocument {
 }
 
 model MonthlyInterestSchemeProjectType {
-  id                             String                  @id @default(uuid())
-  name                           String
-  minimumAmount                  Decimal                 @default(0) @db.Decimal(14, 2)
-  calculationMethod              MisCalculationMethod   @default(MONTHLY_PAYOUT_PER_HUNDRED)
-  monthlyPayoutAmountPerHundred  Decimal?               @db.Decimal(14, 2)
-  annualInterestRate             Decimal?                @db.Decimal(7, 4)
-  duration                       Int
-  version                        Int                     @default(1)
-  isArchived                     Boolean                 @default(false)
-  societyId                      String
-  isDeleted                      Boolean                 @default(false)
-  deletedAt                      DateTime?
-  createdBy                      String
-  updatedBy                      String?
-  createdAt                      DateTime                @default(now())
-  updatedAt                      DateTime                @updatedAt
-  monthlyInterestScheme          MonthlyInterestScheme[]
-  society                        Society                 @relation(fields: [societyId], references: [id])
+  id                            String                  @id @default(uuid())
+  name                          String
+  minimumAmount                 Decimal                 @default(0) @db.Decimal(14, 2)
+  calculationMethod             MisCalculationMethod    @default(MONTHLY_PAYOUT_PER_HUNDRED)
+  monthlyPayoutAmountPerHundred Decimal?                @db.Decimal(14, 2)
+  annualInterestRate            Decimal?                @db.Decimal(7, 4)
+  duration                      Int
+  version                       Int                     @default(1)
+  isArchived                    Boolean                 @default(false)
+  societyId                     String
+  isDeleted                     Boolean                 @default(false)
+  deletedAt                     DateTime?
+  createdBy                     String
+  updatedBy                     String?
+  createdAt                     DateTime                @default(now())
+  updatedAt                     DateTime                @updatedAt
+  monthlyInterestScheme         MonthlyInterestScheme[]
+  society                       Society                 @relation(fields: [societyId], references: [id])
 
   @@index([societyId])
   @@index([name])
@@ -445,84 +446,84 @@ model MonthlyInterestSchemeTransaction {
 }
 
 model RecurringDepositProjectType {
-  id                   String                 @id @default(uuid())
-  name                 String
-  duration             Int
-  minimumMonthlyAmount Decimal                @db.Decimal(14, 2)
-  maturityPerHundred   Decimal                @db.Decimal(14, 2)
-  fineCalculationMethod RdFineCalculationMethod @default(FIXED_PER_STREAK_UNIT)
-  fixedOverdueFineAmount Decimal?             @db.Decimal(14, 2)
-  fineRatePerHundred   Decimal                @db.Decimal(14, 2)
-  graceDays            Int                    @default(0)
-  penaltyMultiplier    Decimal?           @db.Decimal(14, 2)
-  penaltyStartMonth    Int?
-  version              Int                @default(1)
-  isArchived           Boolean            @default(false)
-  societyId            String
-  isDeleted            Boolean            @default(false)
-  deletedAt            DateTime?
-  createdBy            String
-  updatedBy            String?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  recurringDeposits    RecurringDeposit[]
-  society              Society            @relation(fields: [societyId], references: [id])
+  id                     String                  @id @default(uuid())
+  name                   String
+  duration               Int
+  minimumMonthlyAmount   Decimal                 @db.Decimal(14, 2)
+  maturityPerHundred     Decimal                 @db.Decimal(14, 2)
+  fineCalculationMethod  RdFineCalculationMethod @default(FIXED_PER_STREAK_UNIT)
+  fixedOverdueFineAmount Decimal?                @db.Decimal(14, 2)
+  fineRatePerHundred     Decimal                 @db.Decimal(14, 2)
+  graceDays              Int                     @default(0)
+  penaltyMultiplier      Decimal?                @db.Decimal(14, 2)
+  penaltyStartMonth      Int?
+  version                Int                     @default(1)
+  isArchived             Boolean                 @default(false)
+  societyId              String
+  isDeleted              Boolean                 @default(false)
+  deletedAt              DateTime?
+  createdBy              String
+  updatedBy              String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  recurringDeposits      RecurringDeposit[]
+  society                Society                 @relation(fields: [societyId], references: [id])
 
   @@index([societyId])
   @@index([name])
 }
 
 model RecurringDeposit {
-  id                         String                        @id @default(uuid())
-  monthlyAmount              Decimal                       @db.Decimal(14, 2)
-  totalPrincipalExpected     Decimal                       @db.Decimal(14, 2)
-  expectedMaturityPayout     Decimal                       @db.Decimal(14, 2)
-  maturityPerHundredSnapshot Decimal                       @db.Decimal(14, 2)
-  fineCalculationMethodSnapshot RdFineCalculationMethod
-  fixedOverdueFineAmountSnapshot Decimal?                  @db.Decimal(14, 2)
-  fineRatePerHundredSnapshot Decimal                       @db.Decimal(14, 2)
-  graceDaysSnapshot          Int
-  penaltyMultiplierSnapshot  Decimal?                      @db.Decimal(14, 2)
-  penaltyStartMonthSnapshot  Int?
-  startDate                  DateTime
-  maturityDate               DateTime
-  status                     ServiceStatus
-  projectTypeId              String
-  customerId                 String
-  isDeleted                  Boolean                       @default(false)
-  deletedAt                  DateTime?
-  createdBy                  String
-  updatedBy                  String?
-  createdAt                  DateTime                      @default(now())
-  updatedAt                  DateTime                      @updatedAt
-  customer                   Customer                      @relation(fields: [customerId], references: [id])
-  projectType                RecurringDepositProjectType   @relation(fields: [projectTypeId], references: [id])
-  installments               RecurringDepositInstallment[]
-  transactions               RecurringDepositTransaction[]
-  fineWaiveRequests          RdFineWaiveRequest[]
-  documents                  ServiceDocument[]
+  id                             String                        @id @default(uuid())
+  monthlyAmount                  Decimal                       @db.Decimal(14, 2)
+  totalPrincipalExpected         Decimal                       @db.Decimal(14, 2)
+  expectedMaturityPayout         Decimal                       @db.Decimal(14, 2)
+  maturityPerHundredSnapshot     Decimal                       @db.Decimal(14, 2)
+  fineCalculationMethodSnapshot  RdFineCalculationMethod
+  fixedOverdueFineAmountSnapshot Decimal?                      @db.Decimal(14, 2)
+  fineRatePerHundredSnapshot     Decimal                       @db.Decimal(14, 2)
+  graceDaysSnapshot              Int
+  penaltyMultiplierSnapshot      Decimal?                      @db.Decimal(14, 2)
+  penaltyStartMonthSnapshot      Int?
+  startDate                      DateTime
+  maturityDate                   DateTime
+  status                         ServiceStatus
+  projectTypeId                  String
+  customerId                     String
+  isDeleted                      Boolean                       @default(false)
+  deletedAt                      DateTime?
+  createdBy                      String
+  updatedBy                      String?
+  createdAt                      DateTime                      @default(now())
+  updatedAt                      DateTime                      @updatedAt
+  customer                       Customer                      @relation(fields: [customerId], references: [id])
+  projectType                    RecurringDepositProjectType   @relation(fields: [projectTypeId], references: [id])
+  installments                   RecurringDepositInstallment[]
+  transactions                   RecurringDepositTransaction[]
+  fineWaiveRequests              RdFineWaiveRequest[]
+  documents                      ServiceDocument[]
 
   @@index([projectTypeId])
   @@index([customerId])
 }
 
 model RecurringDepositInstallment {
-  id                 String                              @id @default(uuid())
-  recurringDepositId String
-  monthIndex         Int
-  dueDate            DateTime
-  principalAmount    Decimal                             @db.Decimal(14, 2)
-  paidPrincipal      Decimal                             @default(0) @db.Decimal(14, 2)
-  deferredFineAccrued Decimal                            @default(0) @db.Decimal(14, 2)
-  status             RecurringDepositInstallmentStatus   @default(PENDING)
-  isDeleted          Boolean                             @default(false)
-  deletedAt          DateTime?
-  createdBy          String
-  updatedBy          String?
-  createdAt          DateTime                            @default(now())
-  updatedAt          DateTime                            @updatedAt
-  recurringDeposit   RecurringDeposit                    @relation(fields: [recurringDepositId], references: [id])
-  paymentAllocations RecurringDepositPaymentAllocation[]
+  id                  String                              @id @default(uuid())
+  recurringDepositId  String
+  monthIndex          Int
+  dueDate             DateTime
+  principalAmount     Decimal                             @db.Decimal(14, 2)
+  paidPrincipal       Decimal                             @default(0) @db.Decimal(14, 2)
+  deferredFineAccrued Decimal                             @default(0) @db.Decimal(14, 2)
+  status              RecurringDepositInstallmentStatus   @default(PENDING)
+  isDeleted           Boolean                             @default(false)
+  deletedAt           DateTime?
+  createdBy           String
+  updatedBy           String?
+  createdAt           DateTime                            @default(now())
+  updatedAt           DateTime                            @updatedAt
+  recurringDeposit    RecurringDeposit                    @relation(fields: [recurringDepositId], references: [id])
+  paymentAllocations  RecurringDepositPaymentAllocation[]
 
   @@unique([recurringDepositId, monthIndex])
   @@index([recurringDepositId, dueDate])
@@ -555,18 +556,18 @@ model RecurringDepositTransaction {
 }
 
 model RecurringDepositPaymentAllocation {
-  id               String                      @id @default(uuid())
-  transactionId    String
-  installmentId    String
-  principalApplied Decimal                     @db.Decimal(14, 2)
-  fineApplied      Decimal                     @default(0) @db.Decimal(14, 2)
-  waivedFineAmount Decimal                     @default(0) @db.Decimal(14, 2)
-  waivedByRequestId String?
+  id                           String                      @id @default(uuid())
+  transactionId                String
+  installmentId                String
+  principalApplied             Decimal                     @db.Decimal(14, 2)
+  fineApplied                  Decimal                     @default(0) @db.Decimal(14, 2)
+  waivedFineAmount             Decimal                     @default(0) @db.Decimal(14, 2)
+  waivedByRequestId            String?
   waivedApprovedByMembershipId String?
-  createdAt        DateTime                    @default(now())
-  installment      RecurringDepositInstallment @relation(fields: [installmentId], references: [id])
-  transaction      RecurringDepositTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  waiveRequest     RdFineWaiveRequest?         @relation(fields: [waivedByRequestId], references: [id])
+  createdAt                    DateTime                    @default(now())
+  installment                  RecurringDepositInstallment @relation(fields: [installmentId], references: [id])
+  transaction                  RecurringDepositTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  waiveRequest                 RdFineWaiveRequest?         @relation(fields: [waivedByRequestId], references: [id])
 
   @@index([transactionId])
   @@index([installmentId])
@@ -574,37 +575,37 @@ model RecurringDepositPaymentAllocation {
 }
 
 model RdFineWaiveRequest {
-  id                        String                         @id @default(uuid())
-  recurringDepositId        String
-  requestedByMembershipId   String
-  scopeType                 RdFineWaiveScopeType
-  reason                    String?
-  expiresAt                 DateTime
-  status                    RdFineWaiveRequestStatus      @default(PENDING)
-  reduceFromMaturity        Boolean                        @default(false)
-  approvedByMembershipId    String?
-  approvedAt                DateTime?
-  rejectedByMembershipId    String?
-  rejectedAt                DateTime?
-  rejectionReason           String?
-  invalidationReason        RdFineWaiveInvalidationReason?
-  createdAt                 DateTime                       @default(now())
-  updatedAt                 DateTime                       @updatedAt
-  recurringDeposit          RecurringDeposit               @relation(fields: [recurringDepositId], references: [id], onDelete: Cascade)
-  months                    RdFineWaiveRequestMonth[]
-  paymentAllocations        RecurringDepositPaymentAllocation[]
+  id                      String                              @id @default(uuid())
+  recurringDepositId      String
+  requestedByMembershipId String
+  scopeType               RdFineWaiveScopeType
+  reason                  String?
+  expiresAt               DateTime
+  status                  RdFineWaiveRequestStatus            @default(PENDING)
+  reduceFromMaturity      Boolean                             @default(false)
+  approvedByMembershipId  String?
+  approvedAt              DateTime?
+  rejectedByMembershipId  String?
+  rejectedAt              DateTime?
+  rejectionReason         String?
+  invalidationReason      RdFineWaiveInvalidationReason?
+  createdAt               DateTime                            @default(now())
+  updatedAt               DateTime                            @updatedAt
+  recurringDeposit        RecurringDeposit                    @relation(fields: [recurringDepositId], references: [id], onDelete: Cascade)
+  months                  RdFineWaiveRequestMonth[]
+  paymentAllocations      RecurringDepositPaymentAllocation[]
 
   @@index([recurringDepositId, status, expiresAt])
   @@index([requestedByMembershipId])
 }
 
 model RdFineWaiveRequestMonth {
-  id                 String             @id @default(uuid())
-  requestId          String
-  monthIndex         Int
-  waivedFineAmount   Decimal            @default(0) @db.Decimal(14, 2)
-  createdAt          DateTime           @default(now())
-  request            RdFineWaiveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  id               String             @id @default(uuid())
+  requestId        String
+  monthIndex       Int
+  waivedFineAmount Decimal            @default(0) @db.Decimal(14, 2)
+  createdAt        DateTime           @default(now())
+  request          RdFineWaiveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, monthIndex])
   @@index([requestId])

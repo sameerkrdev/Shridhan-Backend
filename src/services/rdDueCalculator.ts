@@ -232,7 +232,7 @@ export function fifoAllocatePayment(
   for (const line of ordered) {
     if (remaining.lte(0)) break;
 
-    let pApply = remaining.lt(line.remainingPrincipal) ? remaining : line.remainingPrincipal;
+    const pApply = remaining.lt(line.remainingPrincipal) ? remaining : line.remainingPrincipal;
     remaining = remaining.sub(pApply);
 
     let fApply = new Prisma.Decimal(0);
